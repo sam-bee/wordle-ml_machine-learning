@@ -370,7 +370,11 @@ func Run(options Options, stdout io.Writer) (Result, error) {
 			}
 			log("games checkpoint=initial step=0 solved_fraction=%g mean_guesses=%g failures=%d", baseline.Games.Summary.SolvedFraction, baseline.Games.Summary.MeanGuesses, baseline.Games.Summary.Failures)
 		}
-		if err := writeFinalMetrics(layout, progressResult(0)); err != nil {
+		initialResult := progressResult(0)
+		if err := validatePriorValidationEvidence(initialResult, validationData.Len()); err != nil {
+			return Result{}, fmt.Errorf("persist initial validation evidence: %w", err)
+		}
+		if err := writeFinalMetrics(layout, initialResult); err != nil {
 			return Result{}, err
 		}
 		log("validation step=0 loss=%g top1=%g top5=%g top16=%g opening_guess=%s", initialValidation.Loss, initialValidation.Top1, initialValidation.Top5, initialValidation.Top16, initialValidationDetails.OpeningWord)
@@ -498,10 +502,11 @@ func Run(options Options, stdout io.Writer) (Result, error) {
 		if step%config.ValidationEvery != 0 && step != limit {
 			continue
 		}
-		finalValidationDetails, samples, err := evaluateDetailed(session, validationData, opening, func(action int) string { word, _ := vocab.ActionWord(action); return word })
+		evaluatedValidation, samples, err := evaluateDetailed(session, validationData, opening, func(action int) string { word, _ := vocab.ActionWord(action); return word })
 		if err != nil {
 			return Result{}, fmt.Errorf("validation update %d: %w", step, err)
 		}
+		finalValidationDetails = evaluatedValidation
 		finalValidation = finalValidationDetails.Metrics
 		finalValidationDetails.Update = step
 		if err := validateValidationSnapshotEvidence(finalValidationDetails, validationData.Len()); err != nil {
@@ -547,7 +552,11 @@ func Run(options Options, stdout io.Writer) (Result, error) {
 			}
 			resumeProof.Completed = true
 		}
-		if err := writeFinalMetrics(layout, progressResult(step)); err != nil {
+		progress := progressResult(step)
+		if err := validatePriorValidationEvidence(progress, validationData.Len()); err != nil {
+			return Result{}, fmt.Errorf("persist validation evidence at update %d: %w", step, err)
+		}
+		if err := writeFinalMetrics(layout, progress); err != nil {
 			return Result{}, err
 		}
 		log("validation step=%d loss=%g top1=%g top5=%g top16=%g opening_guess=%s validation_seconds=%g", step, finalValidation.Loss, finalValidation.Top1, finalValidation.Top5, finalValidation.Top16, finalValidationDetails.OpeningWord, finalValidationDetails.DurationSeconds)
@@ -587,6 +596,9 @@ func Run(options Options, stdout io.Writer) (Result, error) {
 		if !result.Passed {
 			gateErr = fmt.Errorf("full proof gate failed: training loss %g -> %g, validation initial=%+v best=%+v, improving validation checkpoints %d, improving major groups turns=%d/%v shortlist=%d/%v (minimum %d examples)", result.InitialTraining.Loss, result.FinalTraining.Loss, result.InitialValidation, result.BestValidation, result.ValidationImprovements, result.MajorGroupLearning.TurnCount, result.MajorGroupLearning.TurnGroups, result.MajorGroupLearning.ShortlistCount, result.MajorGroupLearning.ShortlistGroups, result.MajorGroupLearning.MinimumExamples)
 		}
+	}
+	if err := validatePriorValidationEvidence(result, validationData.Len()); err != nil {
+		return Result{}, fmt.Errorf("persist final validation evidence: %w", err)
 	}
 	if err := writeFinalMetrics(layout, result); err != nil {
 		return Result{}, err

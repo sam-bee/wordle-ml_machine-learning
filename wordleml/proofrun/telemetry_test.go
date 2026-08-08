@@ -211,6 +211,11 @@ func TestPriorValidationEvidenceChecksAllSummariesAndHistory(t *testing.T) {
 	if err := validatePriorValidationEvidence(result, 500); err != nil {
 		t.Fatalf("valid prior evidence: %v", err)
 	}
+	mismatchedFinal := result
+	mismatchedFinal.FinalValidationDetails = initial
+	if err := validatePriorValidationEvidence(mismatchedFinal, 500); err == nil || !strings.Contains(err.Error(), "final snapshot") {
+		t.Fatalf("mismatched final snapshot error = %v", err)
+	}
 	result.ValidationSnapshots[1].Details.ByShortlistBucket = nil
 	if err := validatePriorValidationEvidence(result, 500); err == nil || !strings.Contains(err.Error(), "history snapshot 1") {
 		t.Fatalf("malformed history error = %v", err)
