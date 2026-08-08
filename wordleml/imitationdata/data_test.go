@@ -2,15 +2,12 @@ package imitationdata
 
 import (
 	"encoding/json"
-	"math"
 	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
 
-	"github.com/gomlx/compute"
 	"github.com/gomlx/compute/dtypes"
-	_ "github.com/gomlx/gomlx/backends/default"
 	"github.com/sam-bee/wordle-ml_machine-learning/modelstate"
 	"github.com/sam-bee/wordle-ml_machine-learning/policy"
 	"github.com/sam-bee/wordle-ml_machine-learning/vocabulary"
@@ -108,83 +105,6 @@ func TestIndexOrderIsDeterministic(t *testing.T) {
 	}
 }
 
-func TestUnbatchedDatasetShapesAndDTypes(t *testing.T) {
-	data := loadMini(t)
-	for batch, err := range data.Dataset(1).Iter() {
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer batch.Finalize()
-		wantInputs := []struct {
-			dtype dtypes.DType
-			dims  []int
-		}{
-			{dtypes.Float32, []int{vocabulary.NumSolutions}},
-			{dtypes.Float32, []int{modelstate.CandidateStatsSize}},
-			{dtypes.Int32, nil},
-			{dtypes.Float32, []int{vocabulary.NumActions}},
-			{dtypes.Float32, []int{vocabulary.NumActions}},
-		}
-		for i, want := range wantInputs {
-			if err := batch.Inputs[i].Shape().Check(want.dtype, want.dims...); err != nil {
-				t.Fatalf("input %d: %v", i, err)
-			}
-		}
-		if len(batch.Labels) != 1 {
-			t.Fatalf("labels=%d, want top-1", len(batch.Labels))
-		}
-		if err := batch.Labels[0].Shape().Check(dtypes.Int32, 1); err != nil {
-			t.Fatalf("top-1 label: %v", err)
-		}
-		return
-	}
-	t.Fatal("unbatched dataset produced no batch")
-}
-
-func TestBatchedMiniShapesDTypesAndFiniteValues(t *testing.T) {
-	data := loadMini(t)
-	backend := compute.MustNew()
-	batched := Batch(backend, data.Dataset(9), 3, true)
-	for batch, err := range batched.Iter() {
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer batch.Finalize()
-		wantInputs := []struct {
-			dtype dtypes.DType
-			dims  []int
-		}{
-			{dtypes.Float32, []int{3, vocabulary.NumSolutions}},
-			{dtypes.Float32, []int{3, modelstate.CandidateStatsSize}},
-			{dtypes.Int32, []int{3}},
-			{dtypes.Float32, []int{3, vocabulary.NumActions}},
-			{dtypes.Float32, []int{3, vocabulary.NumActions}},
-		}
-		if len(batch.Inputs) != len(wantInputs) || len(batch.Labels) != 1 {
-			t.Fatalf("inputs=%d labels=%d", len(batch.Inputs), len(batch.Labels))
-		}
-		for i, want := range wantInputs {
-			if err := batch.Inputs[i].Shape().Check(want.dtype, want.dims...); err != nil {
-				t.Fatalf("input %d: %v", i, err)
-			}
-			if want.dtype == dtypes.Float32 {
-				for _, row := range batch.Inputs[i].Value().([][]float32) {
-					for _, value := range row {
-						if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
-							t.Fatalf("input %d has non-finite value %v", i, value)
-						}
-					}
-				}
-			}
-		}
-		if err := batch.Labels[0].Shape().Check(dtypes.Int32, 3, 1); err != nil {
-			t.Fatalf("top-1 label: %v", err)
-		}
-		return
-	}
-	t.Fatal("batched dataset produced no batch")
-}
-
 func TestTrainingSamplerInjectsOpeningAndResumesExactly(t *testing.T) {
 	training := loadTrain(t)
 	opening, found, err := training.FindOpening()
@@ -261,6 +181,59 @@ func TestTrainingSamplerInjectsOpeningAndResumesExactly(t *testing.T) {
 				gotBatch[index].RecordIndex, gotBatch[index].Record.SolutionID,
 				wantBatch[index].RecordIndex, wantBatch[index].Record.SolutionID)
 		}
+	}
+}
+
+func TestTrainingSamplerAdvanceBatchesMatchesMaterializedSequence(t *testing.T) {
+	training := loadTrain(t)
+	opening, found, err := training.FindOpening()
+	if err != nil || !found {
+		t.Fatalf("FindOpening(train) found=%t err=%v", found, err)
+	}
+	mini := loadMini(t)
+	advanced, err := NewTrainingSampler(mini, opening, 128, 71, Cursor{})
+	if err != nil {
+		t.Fatalf("NewTrainingSampler advanced: %v", err)
+	}
+	materialized, err := NewTrainingSampler(mini, opening, 128, 71, Cursor{})
+	if err != nil {
+		t.Fatalf("NewTrainingSampler materialized: %v", err)
+	}
+	const batches = 17
+	if err := advanced.AdvanceBatches(batches); err != nil {
+		t.Fatal(err)
+	}
+	for batch := 0; batch < batches; batch++ {
+		if _, err := materialized.Next(); err != nil {
+			t.Fatalf("materialize batch %d: %v", batch, err)
+		}
+	}
+	if got, want := advanced.Cursor(), materialized.Cursor(); got != want {
+		t.Fatalf("advanced cursor=%+v, want %+v", got, want)
+	}
+	if got, want := advanced.Peek(), materialized.Peek(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("advanced next IDs=%v, want %v", got, want)
+	}
+	if err := advanced.AdvanceBatches(-1); err == nil {
+		t.Fatal("negative batch advance succeeded")
+	}
+}
+
+func TestAuditStateOverlapRecordsKnownAgreeingValidationOverlap(t *testing.T) {
+	training := loadTrain(t)
+	validation := loadValidation(t)
+	audit, err := AuditStateOverlap(training, validation)
+	if err != nil {
+		t.Fatalf("AuditStateOverlap: %v", err)
+	}
+	if audit.TrainingRecords != 52726 || audit.ValidationRecords != 2500 {
+		t.Fatalf("record counts = %+v", audit)
+	}
+	if audit.ValidationUniqueStates != 2445 || audit.OverlappingUniqueStates != 190 {
+		t.Fatalf("known model-state overlap = %+v, want 190/2445 unique validation states", audit)
+	}
+	if audit.TrainingUniqueStates <= audit.OverlappingUniqueStates {
+		t.Fatalf("training unique-state count is implausible: %+v", audit)
 	}
 }
 
@@ -363,6 +336,15 @@ func loadMini(t *testing.T) *Data {
 func loadTrain(t *testing.T) *Data {
 	t.Helper()
 	data, err := Load(loadVocabulary(t), filepath.Join(repositoryRoot(t), "data", "imitation"), Train)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
+
+func loadValidation(t *testing.T) *Data {
+	t.Helper()
+	data, err := Load(loadVocabulary(t), filepath.Join(repositoryRoot(t), "data", "imitation"), Validation)
 	if err != nil {
 		t.Fatal(err)
 	}

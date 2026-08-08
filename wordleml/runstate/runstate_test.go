@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -23,7 +22,7 @@ func TestCreateMakesCompleteSelfContainedLayout(t *testing.T) {
 	if layout.Root != root {
 		t.Fatalf("layout root = %q, want %q", layout.Root, root)
 	}
-	for _, path := range []string{layout.Dir, layout.EventsDir, layout.CheckpointsDir, layout.LatestCheckpointDir, layout.BestCheckpointDir} {
+	for _, path := range []string{layout.Dir, layout.EventsDir, layout.CheckpointsDir, layout.LatestCheckpointDir, layout.BestCheckpointDir, layout.InitialCheckpointDir, layout.EvaluationsDir} {
 		info, err := os.Stat(path)
 		if err != nil {
 			t.Errorf("required directory %q is missing: %v", path, err)
@@ -48,6 +47,90 @@ func TestCreateMakesCompleteSelfContainedLayout(t *testing.T) {
 	if opened != layout {
 		t.Fatalf("Open layout = %#v, want %#v", opened, layout)
 	}
+}
+
+func TestEvaluationArtifactsAreAtomicAndNamed(t *testing.T) {
+	layout, err := Create(t.TempDir(), "evaluation-proof")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := layout.WriteEvaluationJSON("best", "games100", map[string]int{"games": 100}); err != nil {
+		t.Fatal(err)
+	}
+	if err := layout.WriteEvaluationGamesJSONL("best", "games100", []byte("{\"solution\":\"ABCDE\"}\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := layout.WriteValidationGamesJSONL([]byte("{\"solution\":\"ABCDE\"}\n")); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{
+		filepath.Join(layout.EvaluationsDir, "best-games100.json"),
+		filepath.Join(layout.EvaluationsDir, "best-games100.jsonl"),
+		layout.ValidationGamesPath,
+	} {
+		contents, err := os.ReadFile(path)
+		if err != nil || len(contents) == 0 {
+			t.Fatalf("artifact %q = %q, %v", path, contents, err)
+		}
+	}
+	if !strings.HasSuffix(string(mustRead(t, filepath.Join(layout.EvaluationsDir, "best-games100.json"))), "\n") {
+		t.Fatal("evaluation JSON lacks trailing newline")
+	}
+	for _, name := range []string{"", "../bad", "UPPER"} {
+		func() {
+			defer func() {
+				if recover() == nil {
+					t.Errorf("unsafe evaluation name %q did not panic", name)
+				}
+			}()
+			_ = layout.evaluationPath(name, "games100", ".json")
+		}()
+	}
+}
+
+func TestEvaluationArtifactsAreImmutableButIdempotent(t *testing.T) {
+	layout, err := Create(t.TempDir(), "immutable-evaluation")
+	if err != nil {
+		t.Fatal(err)
+	}
+	value := map[string]any{"stage": "full", "score": 1}
+	if err := layout.WriteEvaluationJSON("best", "games100", value); err != nil {
+		t.Fatal(err)
+	}
+	if err := layout.WriteEvaluationJSON("best", "games100", value); err != nil {
+		t.Fatalf("identical evaluation JSON retry: %v", err)
+	}
+	if err := layout.WriteEvaluationJSON("best", "games100", map[string]any{"stage": "full", "score": 2}); err == nil {
+		t.Fatal("different evaluation JSON replaced immutable artifact")
+	}
+	jsonl := []byte("{\"solution\":\"ABCDE\"}\n")
+	if err := layout.WriteEvaluationGamesJSONL("best", "games100", jsonl); err != nil {
+		t.Fatal(err)
+	}
+	if err := layout.WriteEvaluationGamesJSONL("best", "games100", jsonl); err != nil {
+		t.Fatalf("identical JSONL retry: %v", err)
+	}
+	if err := layout.WriteEvaluationGamesJSONL("best", "games100", []byte("{\"solution\":\"OTHER\"}\n")); err == nil {
+		t.Fatal("different JSONL replaced immutable artifact")
+	}
+	if err := layout.WriteValidationGamesJSONL([]byte("first\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := layout.WriteValidationGamesJSONL([]byte("second\n")); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(mustRead(t, layout.ValidationGamesPath)); got != "second\n" {
+		t.Fatalf("canonical games = %q, want replacement", got)
+	}
+}
+
+func mustRead(t *testing.T, path string) []byte {
+	t.Helper()
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return contents
 }
 
 func TestValidateRunIDRejectsUnsafeNames(t *testing.T) {
@@ -153,7 +236,7 @@ func TestStateValidation(t *testing.T) {
 	}
 }
 
-func TestManifestAndMetadataHelpers(t *testing.T) {
+func TestManifestAndMetadataWrites(t *testing.T) {
 	layout, err := Create(t.TempDir(), "metadata-proof")
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -176,21 +259,4 @@ func TestManifestAndMetadataHelpers(t *testing.T) {
 		}
 	}
 
-	hashPath := filepath.Join(layout.Dir, "hash-input")
-	if err := os.WriteFile(hashPath, []byte("wordle"), 0o644); err != nil {
-		t.Fatalf("WriteFile hash input: %v", err)
-	}
-	gotHash, err := FileSHA256(hashPath)
-	if err != nil {
-		t.Fatalf("FileSHA256: %v", err)
-	}
-	const wantHash = "ebe054f08821294feee7bc442014fdd38b4836d83781d8ba99d38eb50d0c9d85"
-	if gotHash != wantHash {
-		t.Fatalf("FileSHA256 = %q, want %q", gotHash, wantHash)
-	}
-
-	metadata := CurrentRuntimeMetadata()
-	if metadata.GoVersion != runtime.Version() || metadata.GOOS != runtime.GOOS || metadata.GOARCH != runtime.GOARCH {
-		t.Fatalf("runtime metadata = %#v", metadata)
-	}
 }

@@ -69,12 +69,28 @@ func (m *Model) Forward(
 	scope *gomlxmodel.Scope,
 	candidateMask, candidateStats, turn, remainingActionMask *graph.Node,
 ) *graph.Node {
+	logits, _ := m.ForwardWithBeta(scope, candidateMask, candidateStats, turn, remainingActionMask)
+	return logits
+}
+
+// ForwardWithBeta builds the policy graph and returns its raw action logits
+// together with the learned per-example candidate bonus. Training and host-side
+// diagnostics use the latter to inspect whether the candidate branch is being
+// used; it does not alter the policy's action space or masking semantics.
+func (m *Model) ForwardWithBeta(
+	scope *gomlxmodel.Scope,
+	candidateMask, candidateStats, turn, remainingActionMask *graph.Node,
+) (logits, beta *graph.Node) {
 	m.validateInputs(candidateMask, candidateStats, turn, remainingActionMask)
 
 	scope = scope.In(modelScopeName)
 
 	candidateCount := graph.InsertAxes(graph.ReduceSum(candidateMask, -1), -1)
-	normalizedCandidateMask := graph.Div(candidateMask, candidateCount)
+	// Game evaluation normally supplies at least one surviving candidate. Keep
+	// raw logits finite even for a defensive empty/terminal state: dividing an
+	// all-zero mask by zero would otherwise poison every downstream diagnostic
+	// with NaNs. This leaves every non-empty mask's mean pooling unchanged.
+	normalizedCandidateMask := graph.Div(candidateMask, graph.Max(candidateCount, graph.ScalarOne(candidateMask.Graph(), dtypes.Float32)))
 	candidateFeatures := activation.Relu(layers.DenseWithBias(
 		scope.In("candidate_projection"),
 		normalizedCandidateMask,
@@ -101,8 +117,8 @@ func (m *Model) Forward(
 	h = activation.Relu(graph.Add(h, r))
 
 	baseLogits := layers.DenseWithBias(scope.In("base_logits"), h, m.config.NumActions)
-	beta := layers.DenseWithBias(scope.In("candidate_bonus"), h, 1)
-	return graph.Add(baseLogits, graph.Mul(beta, remainingActionMask))
+	beta = layers.DenseWithBias(scope.In("candidate_bonus"), h, 1)
+	return graph.Add(baseLogits, graph.Mul(beta, remainingActionMask)), beta
 }
 
 func (m *Model) validateInputs(candidateMask, candidateStats, turn, remainingActionMask *graph.Node) {

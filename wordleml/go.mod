@@ -5,7 +5,7 @@ go 1.26
 require (
 	github.com/gomlx/compute v0.0.0-20260716164435-04857206aff7
 	github.com/gomlx/gomlx v0.28.0
-	github.com/sam-bee/wordle-ml_game-engine v1.0.1
+	github.com/sam-bee/wordle-ml_game-engine v1.1.0
 )
 
 require github.com/sam-bee/wordle-ml_wordlists v1.1.0 // indirect

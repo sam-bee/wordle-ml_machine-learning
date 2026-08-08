@@ -6,18 +6,13 @@
 package runstate
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"math"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
-	"runtime/debug"
 	"strings"
 
 	"github.com/gomlx/gomlx/ml/model"
@@ -34,6 +29,8 @@ const (
 	checkpointsDirectory    = "checkpoints"
 	latestCheckpointDir     = "latest"
 	bestCheckpointDir       = "best"
+	initialCheckpointDir    = "initial"
+	evaluationsDirectory    = "evaluations"
 	maximumRunIDLength      = 128
 	checkpointStateParam    = "supervised_run_state"
 )
@@ -49,16 +46,18 @@ type Layout struct {
 	ID   string
 	Dir  string
 
-	ConfigPath          string
-	MetadataPath        string
-	StatePath           string
-	EventsDir           string
-	CheckpointsDir      string
-	LatestCheckpointDir string
-	BestCheckpointDir   string
-	FinalMetricsPath    string
-	ValidationGamesPath string
-	TrainingLogPath     string
+	ConfigPath           string
+	MetadataPath         string
+	StatePath            string
+	EventsDir            string
+	CheckpointsDir       string
+	LatestCheckpointDir  string
+	BestCheckpointDir    string
+	InitialCheckpointDir string
+	EvaluationsDir       string
+	FinalMetricsPath     string
+	ValidationGamesPath  string
+	TrainingLogPath      string
 }
 
 // New returns the planned layout without creating anything on disk.
@@ -80,19 +79,21 @@ func New(root, runID string) (Layout, error) {
 	}
 	checkpointsDir := filepath.Join(runDir, checkpointsDirectory)
 	return Layout{
-		Root:                absoluteRoot,
-		ID:                  runID,
-		Dir:                 runDir,
-		ConfigPath:          filepath.Join(runDir, configFilename),
-		MetadataPath:        filepath.Join(runDir, metadataFilename),
-		StatePath:           filepath.Join(runDir, stateFilename),
-		EventsDir:           filepath.Join(runDir, eventsDirectory),
-		CheckpointsDir:      checkpointsDir,
-		LatestCheckpointDir: filepath.Join(checkpointsDir, latestCheckpointDir),
-		BestCheckpointDir:   filepath.Join(checkpointsDir, bestCheckpointDir),
-		FinalMetricsPath:    filepath.Join(runDir, finalMetricsFilename),
-		ValidationGamesPath: filepath.Join(runDir, validationGamesFilename),
-		TrainingLogPath:     filepath.Join(runDir, trainingLogFilename),
+		Root:                 absoluteRoot,
+		ID:                   runID,
+		Dir:                  runDir,
+		ConfigPath:           filepath.Join(runDir, configFilename),
+		MetadataPath:         filepath.Join(runDir, metadataFilename),
+		StatePath:            filepath.Join(runDir, stateFilename),
+		EventsDir:            filepath.Join(runDir, eventsDirectory),
+		CheckpointsDir:       checkpointsDir,
+		LatestCheckpointDir:  filepath.Join(checkpointsDir, latestCheckpointDir),
+		BestCheckpointDir:    filepath.Join(checkpointsDir, bestCheckpointDir),
+		InitialCheckpointDir: filepath.Join(checkpointsDir, initialCheckpointDir),
+		EvaluationsDir:       filepath.Join(runDir, evaluationsDirectory),
+		FinalMetricsPath:     filepath.Join(runDir, finalMetricsFilename),
+		ValidationGamesPath:  filepath.Join(runDir, validationGamesFilename),
+		TrainingLogPath:      filepath.Join(runDir, trainingLogFilename),
 	}, nil
 }
 
@@ -112,7 +113,7 @@ func Create(root, runID string) (Layout, error) {
 		}
 		return Layout{}, fmt.Errorf("create run directory %q: %w", layout.Dir, err)
 	}
-	for _, dir := range []string{layout.EventsDir, layout.CheckpointsDir, layout.LatestCheckpointDir, layout.BestCheckpointDir} {
+	for _, dir := range []string{layout.EventsDir, layout.CheckpointsDir, layout.LatestCheckpointDir, layout.BestCheckpointDir, layout.InitialCheckpointDir, layout.EvaluationsDir} {
 		if err := os.Mkdir(dir, 0o755); err != nil {
 			return Layout{}, fmt.Errorf("create run directory %q: %w", dir, err)
 		}
@@ -276,67 +277,52 @@ func (layout Layout) WriteMetadata(metadata any) error {
 	return writeJSONAtomically(layout.MetadataPath, metadata)
 }
 
-// FileSHA256 returns the lower-case SHA-256 digest of a file's bytes.
-func FileSHA256(path string) (string, error) {
-	file, err := os.Open(path)
+// WriteFinalMetricsJSON atomically replaces the runner-owned final metrics
+// artifact. It is deliberately named rather than exposing arbitrary writes.
+func (layout Layout) WriteFinalMetricsJSON(metrics any) error {
+	return writeJSONAtomically(layout.FinalMetricsPath, metrics)
+}
+
+// WriteEvaluationJSON atomically publishes the full structured result for one
+// fixed checkpoint/mode evaluation under evaluations/.
+func (layout Layout) WriteEvaluationJSON(checkpoint, mode string, result any) error {
+	contents, err := json.MarshalIndent(result, "", "  ")
 	if err != nil {
-		return "", fmt.Errorf("open %q for SHA-256: %w", path, err)
+		return fmt.Errorf("encode evaluation JSON: %w", err)
 	}
-	defer func() { _ = file.Close() }()
-	digest := sha256.New()
-	if _, err := io.Copy(digest, file); err != nil {
-		return "", fmt.Errorf("hash %q with SHA-256: %w", path, err)
-	}
-	return hex.EncodeToString(digest.Sum(nil)), nil
+	return publishBytesImmutably(layout.evaluationPath(checkpoint, mode, ".json"), append(contents, '\n'))
 }
 
-// GitCommit returns the checked-out commit of repositoryDir without invoking a
-// shell. It is deliberately a helper rather than implicit metadata collection,
-// since a run needs to record three repositories explicitly.
-func GitCommit(repositoryDir string) (string, error) {
-	if strings.TrimSpace(repositoryDir) == "" {
-		return "", errors.New("repository directory must not be empty")
-	}
-	output, err := exec.Command("git", "-C", repositoryDir, "rev-parse", "HEAD").Output()
-	if err != nil {
-		return "", fmt.Errorf("read Git commit for %q: %w", repositoryDir, err)
-	}
-	commit := strings.TrimSpace(string(output))
-	if commit == "" {
-		return "", fmt.Errorf("Git returned an empty commit for %q", repositoryDir)
-	}
-	return commit, nil
+// WriteEvaluationGamesJSONL atomically publishes named game trajectories under
+// evaluations/. Its contents must already be complete JSONL records.
+func (layout Layout) WriteEvaluationGamesJSONL(checkpoint, mode string, contents []byte) error {
+	return publishBytesImmutably(layout.evaluationPath(checkpoint, mode, ".jsonl"), contents)
 }
 
-// RuntimeMetadata identifies the Go runtime and pinned GoMLX module available
-// to the running binary. Backend, GPU, and CUDA/PJRT details are supplied by
-// the training command because this package deliberately has no CUDA dependency.
-type RuntimeMetadata struct {
-	GoVersion    string `json:"go_version"`
-	GOOS         string `json:"goos"`
-	GOARCH       string `json:"goarch"`
-	GoMLXVersion string `json:"gomlx_version,omitempty"`
+// WriteValidationGamesJSONL atomically updates the conventional top-level
+// game trajectory artifact retained for compatibility with the proof plan.
+func (layout Layout) WriteValidationGamesJSONL(contents []byte) error {
+	return writeBytesAtomically(layout.ValidationGamesPath, contents)
 }
 
-// CurrentRuntimeMetadata collects stable process metadata without inspecting
-// hardware or mutating state.
-func CurrentRuntimeMetadata() RuntimeMetadata {
-	metadata := RuntimeMetadata{
-		GoVersion: runtime.Version(),
-		GOOS:      runtime.GOOS,
-		GOARCH:    runtime.GOARCH,
+func (layout Layout) evaluationPath(checkpoint, mode, suffix string) string {
+	if !safeArtifactPart(checkpoint) || !safeArtifactPart(mode) {
+		panic(fmt.Sprintf("unsafe evaluation artifact identity %q/%q", checkpoint, mode))
 	}
-	buildInfo, ok := debug.ReadBuildInfo()
-	if !ok {
-		return metadata
+	return filepath.Join(layout.EvaluationsDir, checkpoint+"-"+mode+suffix)
+}
+
+func safeArtifactPart(value string) bool {
+	if value == "" {
+		return false
 	}
-	for _, dependency := range buildInfo.Deps {
-		if dependency.Path == "github.com/gomlx/gomlx" {
-			metadata.GoMLXVersion = dependency.Version
-			break
+	for _, character := range value {
+		if (character >= 'a' && character <= 'z') || (character >= '0' && character <= '9') || character == '-' || character == '_' {
+			continue
 		}
+		return false
 	}
-	return metadata
+	return true
 }
 
 func decodeState(contents []byte, source string) (State, error) {
@@ -364,38 +350,96 @@ func writeJSONAtomically(path string, value any) error {
 		return fmt.Errorf("encode JSON for %q: %w", path, err)
 	}
 	contents = append(contents, '\n')
+	return writeBytesAtomically(path, contents)
+}
+
+func writeBytesAtomically(path string, contents []byte) error {
 	directory := filepath.Dir(path)
 	temporary, err := os.CreateTemp(directory, "."+filepath.Base(path)+".tmp-*")
 	if err != nil {
-		return fmt.Errorf("create temporary JSON file beside %q: %w", path, err)
+		return fmt.Errorf("create temporary artifact beside %q: %w", path, err)
 	}
 	temporaryPath := temporary.Name()
 	defer func() { _ = os.Remove(temporaryPath) }()
 	if err := temporary.Chmod(0o644); err != nil {
 		_ = temporary.Close()
-		return fmt.Errorf("set permissions on temporary JSON file for %q: %w", path, err)
+		return fmt.Errorf("set permissions on temporary artifact for %q: %w", path, err)
 	}
 	if _, err := temporary.Write(contents); err != nil {
 		_ = temporary.Close()
-		return fmt.Errorf("write temporary JSON file for %q: %w", path, err)
+		return fmt.Errorf("write temporary artifact for %q: %w", path, err)
 	}
 	if err := temporary.Sync(); err != nil {
 		_ = temporary.Close()
-		return fmt.Errorf("sync temporary JSON file for %q: %w", path, err)
+		return fmt.Errorf("sync temporary artifact for %q: %w", path, err)
 	}
 	if err := temporary.Close(); err != nil {
-		return fmt.Errorf("close temporary JSON file for %q: %w", path, err)
+		return fmt.Errorf("close temporary artifact for %q: %w", path, err)
 	}
 	if err := os.Rename(temporaryPath, path); err != nil {
-		return fmt.Errorf("replace JSON file %q: %w", path, err)
+		return fmt.Errorf("replace artifact %q: %w", path, err)
 	}
 	directoryHandle, err := os.Open(directory)
 	if err != nil {
-		return fmt.Errorf("open JSON directory %q for sync: %w", directory, err)
+		return fmt.Errorf("open artifact directory %q for sync: %w", directory, err)
 	}
 	defer func() { _ = directoryHandle.Close() }()
 	if err := directoryHandle.Sync(); err != nil {
-		return fmt.Errorf("sync JSON directory %q: %w", directory, err)
+		return fmt.Errorf("sync artifact directory %q: %w", directory, err)
+	}
+	return nil
+}
+
+// publishBytesImmutably creates an evaluation artifact exactly once. A retry
+// containing identical bytes is harmless, while different bytes for the same
+// checkpoint/mode are a provenance error rather than an overwrite.
+func publishBytesImmutably(path string, contents []byte) error {
+	if existing, err := os.ReadFile(path); err == nil {
+		if bytes.Equal(existing, contents) {
+			return nil
+		}
+		return fmt.Errorf("immutable evaluation artifact %q already exists with different contents", path)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("read immutable evaluation artifact %q: %w", path, err)
+	}
+	directory := filepath.Dir(path)
+	temporary, err := os.CreateTemp(directory, "."+filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return fmt.Errorf("create temporary immutable artifact beside %q: %w", path, err)
+	}
+	temporaryPath := temporary.Name()
+	defer func() { _ = os.Remove(temporaryPath) }()
+	if err := temporary.Chmod(0o644); err != nil {
+		_ = temporary.Close()
+		return err
+	}
+	if _, err := temporary.Write(contents); err != nil {
+		_ = temporary.Close()
+		return err
+	}
+	if err := temporary.Sync(); err != nil {
+		_ = temporary.Close()
+		return err
+	}
+	if err := temporary.Close(); err != nil {
+		return err
+	}
+	if err := os.Link(temporaryPath, path); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			existing, readErr := os.ReadFile(path)
+			if readErr != nil {
+				return fmt.Errorf("read concurrently published evaluation artifact %q: %w", path, readErr)
+			}
+			if bytes.Equal(existing, contents) {
+				return nil
+			}
+			return fmt.Errorf("immutable evaluation artifact %q was concurrently published with different contents", path)
+		}
+		return fmt.Errorf("publish immutable evaluation artifact %q: %w", path, err)
+	}
+	if directoryHandle, err := os.Open(directory); err == nil {
+		_ = directoryHandle.Sync()
+		_ = directoryHandle.Close()
 	}
 	return nil
 }

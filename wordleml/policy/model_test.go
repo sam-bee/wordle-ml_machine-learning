@@ -78,6 +78,25 @@ func TestCandidateMaskIsMeanPooled(t *testing.T) {
 	}
 }
 
+func TestForwardKeepsRawLogitsFiniteForEmptyCandidateMask(t *testing.T) {
+	config := Config{NumSolutions: 3, NumActions: 4}
+	_, _, exec := newTestExec(t, config)
+	defer exec.Finalize()
+
+	output := exec.MustCall1(
+		zeroMatrix(1, config.NumSolutions),
+		zeroMatrix(1, CandidateStatsSize),
+		[]int32{0},
+		zeroMatrix(1, config.NumActions),
+	)
+	defer func() { _ = output.FinalizeAll() }()
+	for action, value := range output.Value().([][]float32)[0] {
+		if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
+			t.Fatalf("raw logit %d is not finite for empty candidate mask: %v", action, value)
+		}
+	}
+}
+
 func TestCandidateBonusOnlyChangesSelectedLogits(t *testing.T) {
 	config := Config{NumSolutions: 3, NumActions: 4}
 	_, store, exec := newTestExec(t, config)
