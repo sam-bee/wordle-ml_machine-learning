@@ -15,9 +15,13 @@ These are wordlists that provide a set of legal actions in the game of Wordle, l
 
 ## Game Engine
 
-A game engine for Wordle.
+The authoritative Wordle feedback implementation. Synthetic-data release
+`v0.1.0` and this module use game-engine release `v1.0.1`, which correctly
+handles repeated letters by consuming matched occurrences.
 
 ## Synthetic Data Creation
 
-A Wordle player that can create training data for a model that is to play Wordle. If desired, this could be imported as
-a Go dependency to this project.
+A Wordle teacher and offline corpus generator. Release `v0.1.0` owns the WDIT
+v3 artifacts copied into `data/imitation/` and is imported here for its reader
+and record contract. Expensive teacher ranking remains in that repository;
+this repository expands the frozen records into model inputs on demand.

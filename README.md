@@ -1,8 +1,9 @@
 # Wordle ML
 
-Wordle ML is a Go and CUDA project that will train a GoMLX model to play Wordle. The repository currently provides the
-GoMLX policy architecture, model vocabularies, reproducible development stack, a GPU smoke test, TensorBoard, and a
-placeholder web visualiser. Training and gameplay are not implemented yet.
+Wordle ML is a Go and CUDA project for training a GoMLX policy to play Wordle. The repository currently provides the
+policy architecture, fixed model vocabularies, shared state encoder, frozen offline teacher corpus, deterministic
+batching, reproducible development stack, GPU smoke test, TensorBoard service, and placeholder web visualiser. The
+supervised training loop and gameplay are the next stages.
 
 ## Quick start
 
@@ -28,6 +29,13 @@ The training, validation, and final-test solution splits and proposed model-acti
 Their format, generation, and provenance are documented in
 [`docs/data/overview-of-wordlists.md`](docs/data/overview-of-wordlists.md).
 
+The checked-in WDIT v3 corpus contains 52,726 training records (including the opening state), 1,600 mini records, and
+2,500 records in each of the validation and sealed final-test splits. `wordleml/imitationdata` validates and batches
+these records without rerunning the expensive teacher.
+
 The policy consumes precomputed candidate-set features and emits one raw logit per action. Its deliberately small
 residual architecture and exact parameter accounting are documented in
 [`docs/ml/model-structure.md`](docs/ml/model-structure.md).
+
+The remaining work before the first experiment is tracked in
+[`docs/project-plan/next-steps.md`](docs/project-plan/next-steps.md).

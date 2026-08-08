@@ -36,3 +36,8 @@ requires both files, checks the binary header and every vocabulary/split hash
 against these word lists, and verifies the sidecar basename, dimensions,
 membership IDs, and opening-record declaration. Default inspection and tests
 use mini; they deliberately do not open final-test records.
+
+These are the frozen `wordle-ml_synthetic-data-creation` release `v0.1.0`
+artifacts. Train contains 52,726 records, including one opening record; mini
+contains 1,600; validation and final test contain 2,500 each. The final-test
+files remain sealed while training and model decisions are made.

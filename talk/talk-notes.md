@@ -22,7 +22,7 @@ gradually and keep the Wordle problem visible throughout, rather than turning in
 - Use the small CUDA smoke kernel to make `sm_120`, compute capability 12.0, host/device memory, and kernel launch syntax
   concrete before introducing model code.
 - Follow it with the GoMLX Euclidean-distance graph to introduce symbolic graphs, XLA compilation, and the CUDA backend
-  without pretending that the Wordle model already exists.
+  before introducing the full Wordle policy graph.
 - Mention TensorBoard and the visualiser only briefly at this stage. Their deliberately empty states make a useful
   before-and-after contrast once training metrics and gameplay data are implemented.
 
@@ -38,6 +38,9 @@ gradually and keep the Wordle problem visible throughout, rather than turning in
   held back for one final test. This prevents states for the same answer leaking across datasets.
 - Keep the full 2,309-word backup alongside the fixed split. Repeatedly consulting the final test set turns human
   judgement into another way of overfitting.
+- Freeze the generated examples as a versioned offline corpus: WDIT v3 release `v0.1.0` contains 52,726 training
+  records, 1,600 mini records, and 2,500 records in each validation and final-test split. Teacher ranking is not part of
+  the training hot path.
 
 ## A compact policy model
 

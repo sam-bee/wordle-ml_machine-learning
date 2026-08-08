@@ -8,3 +8,5 @@ Current project documentation:
 - [`data/overview-of-wordlists.md`](data/overview-of-wordlists.md) documents the model vocabularies and their provenance.
 - [`ml/model-structure.md`](ml/model-structure.md) describes the GoMLX policy architecture and parameter count.
 - [`ml/board-state-encoding.md`](ml/board-state-encoding.md) describes the four precomputed tensors consumed by the model.
+- [`project-plan/next-steps.md`](project-plan/next-steps.md) records only the immediate work towards the first training
+  experiment.
