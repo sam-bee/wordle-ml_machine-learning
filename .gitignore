@@ -1,4 +1,5 @@
 .env
+.codex/
 /wordleml/smoke
 /wordleml/inspect
 /wordleml/train
