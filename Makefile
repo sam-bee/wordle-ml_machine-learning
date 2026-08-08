@@ -24,11 +24,11 @@ docker-build: .env
 
 build: docker-build
 	docker compose run --rm --no-deps wordleml bash -lc \
-		'go build -o /tmp/wordleml-smoke ./cmd/smoke && go build -o /tmp/wordleml-inspect ./cmd/inspect && cd /workspace/web && go build -o /tmp/wordleml-web ./cmd/server'
+		'go build -o /tmp/wordleml-smoke ./cmd/smoke && go build -o /tmp/wordleml-inspect ./cmd/inspect && go build -o /tmp/wordleml-train ./cmd/train && cd /workspace/web && go build -o /tmp/wordleml-web ./cmd/server'
 
 test: docker-build
 	docker compose run --rm --no-deps wordleml bash -lc \
-		'go test ./... && cd /workspace/web && go test ./...'
+		'go test -p 1 ./... && cd /workspace/web && go test ./...'
 
 tidy: docker-build
 	docker compose run --rm --no-deps wordleml bash -lc \

@@ -1,3 +1,4 @@
 .env
 /wordleml/smoke
 /wordleml/inspect
+/wordleml/train
