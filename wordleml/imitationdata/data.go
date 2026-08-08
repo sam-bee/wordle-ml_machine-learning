@@ -3,19 +3,18 @@
 package imitationdata
 
 import (
+	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"iter"
 	"math/rand"
 	"os"
 	"path/filepath"
 	"sort"
 
-	"github.com/gomlx/compute"
 	"github.com/gomlx/gomlx/core/tensors"
-	gomlxdataset "github.com/gomlx/gomlx/ml/dataset"
 	"github.com/gomlx/gomlx/ml/train"
 	"github.com/sam-bee/wordle-ml_game-engine/words"
 	"github.com/sam-bee/wordle-ml_machine-learning/modelstate"
@@ -57,6 +56,18 @@ type Example struct {
 	AvailableActionMask []float32
 	TeacherTopAction    int32
 	TeacherTopActions   [16]int32
+}
+
+// StateOverlapAudit records exact overlap in the model's encoded input space.
+// It is distinct from solution-split overlap: the frozen train and validation
+// solution IDs remain disjoint, while trajectories can still reach the same
+// candidate/turn/history state.
+type StateOverlapAudit struct {
+	TrainingRecords         int `json:"training_records"`
+	TrainingUniqueStates    int `json:"training_unique_states"`
+	ValidationRecords       int `json:"validation_records"`
+	ValidationUniqueStates  int `json:"validation_unique_states"`
+	OverlappingUniqueStates int `json:"overlapping_unique_states"`
 }
 
 // Load reads and validates the binary dataset and its required JSON sidecar.
@@ -162,6 +173,93 @@ func (d *Data) Example(index int) (Example, error) {
 	}, nil
 }
 
+// ModelStateIdentity returns the exact semantic model-input identity and
+// teacher top-1 label without expanding the record into large float masks.
+func (d *Data) ModelStateIdentity(index int) ([sha256.Size]byte, int32, error) {
+	record, err := d.Record(index)
+	if err != nil {
+		return [sha256.Size]byte{}, 0, err
+	}
+	return modelStateKey(record), int32(record.TopKActionIDs[0]), nil
+}
+
+// ModelStateKey returns the semantic input identity for an already expanded
+// example. It is primarily useful for assertions on selected proof batches.
+func ModelStateKey(example Example) [sha256.Size]byte {
+	return modelStateKey(example.Record)
+}
+
+// AuditStateOverlap compares unique train and validation model inputs. Any
+// conflicting top-1 label is an engineering error; agreeing duplicates are
+// counted and retained as a provenance warning for the proof report.
+func AuditStateOverlap(training, validation *Data) (StateOverlapAudit, error) {
+	if training == nil || validation == nil {
+		return StateOverlapAudit{}, errors.New("training and validation data are required for overlap audit")
+	}
+	if training.split != Train || validation.split != Validation {
+		return StateOverlapAudit{}, fmt.Errorf("overlap audit needs train and validation splits, got %s and %s", training.split, validation.split)
+	}
+	trainingStates := make(map[[sha256.Size]byte]int32, training.Len())
+	for index, record := range training.records {
+		key, label := modelStateKey(record), int32(record.TopKActionIDs[0])
+		if prior, found := trainingStates[key]; found && prior != label {
+			return StateOverlapAudit{}, fmt.Errorf("training records with model state %x have conflicting top-1 labels %d and %d (record %d)", key, prior, label, index)
+		}
+		trainingStates[key] = label
+	}
+	validationStates := make(map[[sha256.Size]byte]int32, validation.Len())
+	for index, record := range validation.records {
+		key, label := modelStateKey(record), int32(record.TopKActionIDs[0])
+		if prior, found := validationStates[key]; found && prior != label {
+			return StateOverlapAudit{}, fmt.Errorf("validation records with model state %x have conflicting top-1 labels %d and %d (record %d)", key, prior, label, index)
+		}
+		validationStates[key] = label
+	}
+	overlapping := 0
+	for key, validationLabel := range validationStates {
+		trainingLabel, found := trainingStates[key]
+		if !found {
+			continue
+		}
+		if trainingLabel != validationLabel {
+			return StateOverlapAudit{}, fmt.Errorf("train/validation model state %x has conflicting top-1 labels %d and %d", key, trainingLabel, validationLabel)
+		}
+		overlapping++
+	}
+	return StateOverlapAudit{
+		TrainingRecords:         training.Len(),
+		TrainingUniqueStates:    len(trainingStates),
+		ValidationRecords:       validation.Len(),
+		ValidationUniqueStates:  len(validationStates),
+		OverlappingUniqueStates: overlapping,
+	}, nil
+}
+
+func modelStateKey(record synthetic.Record) [sha256.Size]byte {
+	hash := sha256.New()
+	_, _ = hash.Write(record.CandidateBits[:])
+	var encodedTurn [4]byte
+	binary.LittleEndian.PutUint32(encodedTurn[:], uint32(record.TurnDepth))
+	_, _ = hash.Write(encodedTurn[:])
+
+	guessed := make([]uint16, int(record.TurnDepth))
+	for index := range guessed {
+		guessed[index] = record.History[index].GuessID
+	}
+	sort.Slice(guessed, func(left, right int) bool { return guessed[left] < guessed[right] })
+	var encodedAction [2]byte
+	for index, actionID := range guessed {
+		if index > 0 && actionID == guessed[index-1] {
+			continue
+		}
+		binary.LittleEndian.PutUint16(encodedAction[:], actionID)
+		_, _ = hash.Write(encodedAction[:])
+	}
+	var key [sha256.Size]byte
+	copy(key[:], hash.Sum(nil))
+	return key
+}
+
 // FindOpening returns the single empty-board training example. Other splits do
 // not contain it. A malformed training split with zero or multiple openings is
 // rejected rather than silently weakening opening-state sampling.
@@ -197,19 +295,6 @@ func (d *Data) IndexOrder(seed int64) []int {
 	}
 	rand.New(rand.NewSource(seed)).Shuffle(len(order), func(i, j int) { order[i], order[j] = order[j], order[i] })
 	return order
-}
-
-// Dataset returns an unbatched GoMLX dataset in deterministic shuffled order.
-func (d *Data) Dataset(seed int64) train.Dataset {
-	return &dataset{data: d, order: d.IndexOrder(seed)}
-}
-
-// Batch is the thin standard GoMLX batching wrapper for this package's
-// unbatched Dataset. Its five inputs have shapes [B,2309], [B,209], [B],
-// [B,4739], [B,4739], and its loss label has shape [B,1]. The proof
-// runner uses MaterializeBatch when it also needs the teacher's top 16.
-func Batch(backend compute.Backend, source train.Dataset, batchSize int, dropIncomplete bool) train.Dataset {
-	return gomlxdataset.Batch(backend, source, batchSize, true, dropIncomplete)
 }
 
 // Cursor identifies the next non-opening source record in a deterministic
@@ -315,6 +400,21 @@ func (s *TrainingSampler) Peek() []int {
 	return indices
 }
 
+// AdvanceBatches advances the sampler by whole training batches without
+// expanding records into Examples. It is used to independently audit a
+// checkpoint cursor against the uninterrupted shuffled sequence.
+func (s *TrainingSampler) AdvanceBatches(batches int) error {
+	if batches < 0 {
+		return fmt.Errorf("batch advance must not be negative: %d", batches)
+	}
+	for batch := 0; batch < batches; batch++ {
+		for index := 1; index < s.batchSize; index++ {
+			_ = s.nextRecordIndex()
+		}
+	}
+	return nil
+}
+
 func (s *TrainingSampler) nextRecordIndex() int {
 	s.normalizeCursor()
 	recordIndex := s.order[s.cursor.Offset]
@@ -385,38 +485,6 @@ func MaterializeBatch(examples []Example) (train.Batch, error) {
 			tensors.FromFlatDataAndDimensions(teacherTop16, batchSize, 16),
 		},
 	}, nil
-}
-
-type dataset struct {
-	data  *Data
-	order []int
-}
-
-func (ds *dataset) Name() string { return "wordle-imitation-" + string(ds.data.split) }
-
-func (ds *dataset) Iter() iter.Seq2[train.Batch, error] {
-	return func(yield func(train.Batch, error) bool) {
-		for _, index := range ds.order {
-			example, err := ds.data.Example(index)
-			if err != nil {
-				yield(train.Batch{}, err)
-				return
-			}
-			batch := train.Batch{
-				Inputs: []*tensors.Tensor{
-					tensors.FromFlatDataAndDimensions(example.CandidateMask, vocabulary.NumSolutions),
-					tensors.FromFlatDataAndDimensions(example.CandidateStats, modelstate.CandidateStatsSize),
-					tensors.FromScalar(example.Turn),
-					tensors.FromFlatDataAndDimensions(example.RemainingActionMask, vocabulary.NumActions),
-					tensors.FromFlatDataAndDimensions(example.AvailableActionMask, vocabulary.NumActions),
-				},
-				Labels: []*tensors.Tensor{tensors.FromFlatDataAndDimensions([]int32{example.TeacherTopAction}, 1)},
-			}
-			if !yield(batch, nil) {
-				return
-			}
-		}
-	}
 }
 
 func expectedSplit(v *vocabulary.Vocabulary, split Split) (synthetic.Split, []uint16, error) {

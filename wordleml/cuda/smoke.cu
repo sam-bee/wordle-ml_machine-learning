@@ -7,7 +7,15 @@
 
 namespace {
 
-constexpr char kExpectedGPU[] = "NVIDIA GeForce RTX 5070 Ti";
+constexpr char kRTX5070Ti[] = "NVIDIA GeForce RTX 5070 Ti";
+constexpr char kRTX5050[] = "NVIDIA GeForce RTX 5050";
+constexpr char kRTX5050Laptop[] = "NVIDIA GeForce RTX 5050 Laptop GPU";
+
+bool isApprovedGPU(const char* name) {
+  return std::strcmp(name, kRTX5070Ti) == 0 ||
+         std::strcmp(name, kRTX5050) == 0 ||
+         std::strcmp(name, kRTX5050Laptop) == 0;
+}
 
 void check(cudaError_t status, const char* operation) {
   if (status == cudaSuccess) {
@@ -34,8 +42,10 @@ int main() {
 
   cudaDeviceProp properties{};
   check(cudaGetDeviceProperties(&properties, 0), "cudaGetDeviceProperties");
-  if (std::strcmp(properties.name, kExpectedGPU) != 0) {
-    std::fprintf(stderr, "expected %s, found %s\n", kExpectedGPU, properties.name);
+  if (!isApprovedGPU(properties.name)) {
+    std::fprintf(stderr,
+                 "expected approved RTX 5070 Ti or RTX 5050 (including Laptop GPU), found %s\n",
+                 properties.name);
     return EXIT_FAILURE;
   }
   if (properties.major != 12 || properties.minor != 0) {

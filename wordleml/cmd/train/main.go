@@ -1,4 +1,4 @@
-// Command train runs a deliberately bounded supervised Wordle policy update.
+// Command train runs one fixed supervised-training proof stage.
 package main
 
 import (
@@ -6,30 +6,18 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"math"
 	"os"
 	"path/filepath"
 
-	"github.com/gomlx/compute"
-	"github.com/gomlx/gomlx/core/tensors"
-	"github.com/sam-bee/wordle-ml_machine-learning/imitationdata"
-	"github.com/sam-bee/wordle-ml_machine-learning/policy"
-	"github.com/sam-bee/wordle-ml_machine-learning/supervised"
-	"github.com/sam-bee/wordle-ml_machine-learning/tensorboard"
-	"github.com/sam-bee/wordle-ml_machine-learning/vocabulary"
+	"github.com/sam-bee/wordle-ml_machine-learning/proofrun"
 )
 
-const defaultSeed int64 = 20260808
-
 type config struct {
-	vocabularyDir  string
-	imitationDir   string
-	checkpointDir  string
-	tensorboardDir string
-	batchSize      int
-	learningRate   float64
-	seed           int64
-	steps          int
+	dataDir string
+	runsDir string
+	runID   string
+	stage   string
+	stopAt  int64
 }
 
 func main() {
@@ -40,83 +28,18 @@ func main() {
 }
 
 func run(args []string, stdout, stderr io.Writer) error {
-	cfg, err := parseConfig(args, stderr)
+	config, err := parseConfig(args, stderr)
 	if err != nil {
 		return err
 	}
-	printConfig(stdout, cfg)
-	if cfg.steps == 0 {
-		return nil
-	}
-
-	v, err := vocabulary.Load(cfg.vocabularyDir)
-	if err != nil {
-		return fmt.Errorf("load vocabulary: %w", err)
-	}
-	trainData, err := imitationdata.Load(v, cfg.imitationDir, imitationdata.Train)
-	if err != nil {
-		return fmt.Errorf("load training data: %w", err)
-	}
-	if cfg.batchSize > trainData.Len() {
-		return fmt.Errorf("batch-size %d exceeds %d training records", cfg.batchSize, trainData.Len())
-	}
-	validationData, err := imitationdata.Load(v, cfg.imitationDir, imitationdata.Validation)
-	if err != nil {
-		return fmt.Errorf("load validation data: %w", err)
-	}
-
-	backend, err := compute.NewWithConfig("xla:cuda")
-	if err != nil {
-		return fmt.Errorf("create CUDA backend: %w", err)
-	}
-	defer backend.Finalize()
-
-	session, err := supervised.New(supervised.Config{
-		Policy: policy.Config{
-			NumSolutions: vocabulary.NumSolutions,
-			NumActions:   vocabulary.NumActions,
-		},
-		LearningRate: cfg.learningRate,
-		Seed:         cfg.seed,
-	}, backend)
-	if err != nil {
-		return fmt.Errorf("create supervised session: %w", err)
-	}
-	checkpoints, err := supervised.NewCheckpoint(session.Store, cfg.checkpointDir)
-	if err != nil {
-		return fmt.Errorf("open checkpoint: %w", err)
-	}
-	events, err := tensorboard.New(cfg.tensorboardDir)
-	if err != nil {
-		return fmt.Errorf("create TensorBoard writer: %w", err)
-	}
-	defer events.Close()
-
-	if err := session.Trainer.ResetTrainMetrics(); err != nil {
-		return fmt.Errorf("reset training metrics: %w", err)
-	}
-	if err := trainSteps(session, trainData, backend, cfg, events); err != nil {
-		return err
-	}
-
-	validationBatches := imitationdata.Batch(
-		backend,
-		validationData.Dataset(cfg.seed),
-		cfg.batchSize,
-		false,
-	)
-	validationMetrics, err := session.Trainer.Eval(validationBatches)
-	if err != nil {
-		return fmt.Errorf("evaluate validation data: %w", err)
-	}
-	if err := writeEvaluationMetrics(events, "validation", session.Trainer.GlobalStep(), validationMetrics); err != nil {
-		return err
-	}
-	if err := checkpoints.Save(); err != nil {
-		return fmt.Errorf("save checkpoint: %w", err)
-	}
-	fmt.Fprintf(stdout, "completed_steps=%d global_step=%d\n", cfg.steps, session.Trainer.GlobalStep())
-	return nil
+	_, err = proofrun.Run(proofrun.Options{
+		DataDir: config.dataDir,
+		RunsDir: config.runsDir,
+		RunID:   config.runID,
+		Stage:   proofrun.Stage(config.stage),
+		StopAt:  config.stopAt,
+	}, stdout)
+	return err
 }
 
 func parseConfig(args []string, stderr io.Writer) (config, error) {
@@ -124,130 +47,36 @@ func parseConfig(args []string, stderr io.Writer) (config, error) {
 	if dataDir == "" {
 		dataDir = "../data"
 	}
+	runsDir := os.Getenv("WORDLEML_RUNS_DIR")
+	if runsDir == "" {
+		runsDir = filepath.Join(filepath.Dir(dataDir), "runs")
+	}
 	flags := flag.NewFlagSet("train", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	flags.Usage = func() {
-		fmt.Fprintln(stderr, "usage: train [flags]")
+		fmt.Fprintln(stderr, "usage: train -run-id=<id> -stage=overfit|mini|full [flags]")
 		flags.PrintDefaults()
 	}
-	cfg := config{}
-	flags.StringVar(&cfg.vocabularyDir, "data-dir", dataDir, "directory containing frozen word lists")
-	flags.StringVar(&cfg.imitationDir, "imitation-dir", "", "directory containing WDIT files (default: <data-dir>/imitation)")
-	flags.StringVar(&cfg.checkpointDir, "checkpoint-dir", "", "checkpoint directory (default: <data-dir>/checkpoints/first-run)")
-	flags.StringVar(&cfg.tensorboardDir, "tensorboard-dir", "", "TensorBoard event directory (default: <data-dir>/tensorboard/first-run)")
-	flags.IntVar(&cfg.batchSize, "batch-size", 32, "examples per training batch")
-	flags.Float64Var(&cfg.learningRate, "learning-rate", 0.001, "Adam learning rate")
-	flags.Int64Var(&cfg.seed, "seed", defaultSeed, "non-zero deterministic seed")
-	flags.IntVar(&cfg.steps, "steps", 0, "bounded training steps; zero only prints configuration")
+	var config config
+	flags.StringVar(&config.dataDir, "data-dir", dataDir, "directory containing frozen vocabularies and imitation data")
+	flags.StringVar(&config.runsDir, "runs-dir", runsDir, "directory containing self-contained proof runs")
+	flags.StringVar(&config.runID, "run-id", "", "required stable proof-run identifier")
+	flags.StringVar(&config.stage, "stage", "", "required fixed stage: overfit, mini, or full")
+	flags.Int64Var(&config.stopAt, "stop-at", 0, "normal mini resume-test stop update (only 500)")
 	if err := flags.Parse(args); err != nil {
-		return config{}, err
+		return config, err
 	}
 	if flags.NArg() != 0 {
-		return config{}, fmt.Errorf("unexpected argument %q", flags.Arg(0))
+		return config, fmt.Errorf("unexpected argument %q", flags.Arg(0))
 	}
-	if cfg.imitationDir == "" {
-		cfg.imitationDir = filepath.Join(cfg.vocabularyDir, "imitation")
+	if config.runID == "" {
+		return config, errors.New("-run-id is required")
 	}
-	if cfg.checkpointDir == "" {
-		cfg.checkpointDir = filepath.Join(cfg.vocabularyDir, "checkpoints", "first-run")
+	if config.stage == "" {
+		return config, errors.New("-stage is required")
 	}
-	if cfg.tensorboardDir == "" {
-		cfg.tensorboardDir = filepath.Join(cfg.vocabularyDir, "tensorboard", "first-run")
+	if _, err := proofrun.ConfigFor(proofrun.Stage(config.stage)); err != nil {
+		return config, err
 	}
-	if cfg.batchSize <= 0 {
-		return config{}, errors.New("batch-size must be positive")
-	}
-	if cfg.learningRate <= 0 || math.IsNaN(cfg.learningRate) || math.IsInf(cfg.learningRate, 0) {
-		return config{}, errors.New("learning-rate must be finite and positive")
-	}
-	if cfg.seed == 0 {
-		return config{}, errors.New("seed must not be zero")
-	}
-	if cfg.steps < 0 {
-		return config{}, errors.New("steps must not be negative")
-	}
-	return cfg, nil
-}
-
-func printConfig(w io.Writer, cfg config) {
-	fmt.Fprintf(w, "data_dir=%s\n", cfg.vocabularyDir)
-	fmt.Fprintf(w, "imitation_dir=%s\n", cfg.imitationDir)
-	fmt.Fprintf(w, "checkpoint_dir=%s\n", cfg.checkpointDir)
-	fmt.Fprintf(w, "tensorboard_dir=%s\n", cfg.tensorboardDir)
-	fmt.Fprintf(w, "batch_size=%d learning_rate=%g seed=%d steps=%d\n", cfg.batchSize, cfg.learningRate, cfg.seed, cfg.steps)
-}
-
-func trainSteps(session *supervised.Session, data *imitationdata.Data, backend compute.Backend, cfg config, events *tensorboard.Writer) error {
-	completed := 0
-	for epoch := int64(0); completed < cfg.steps; epoch++ {
-		batches := imitationdata.Batch(backend, data.Dataset(cfg.seed+epoch), cfg.batchSize, true)
-		for batch, err := range batches.Iter() {
-			if err != nil {
-				return fmt.Errorf("iterate training data: %w", err)
-			}
-			metrics, err := session.Trainer.TrainStep(batch)
-			if err != nil {
-				return fmt.Errorf("training step %d: %w", completed+1, err)
-			}
-			if err := writeTrainingMetrics(events, session.Trainer.GlobalStep(), metrics); err != nil {
-				return err
-			}
-			completed++
-			if completed == cfg.steps {
-				return nil
-			}
-		}
-	}
-	return nil
-}
-
-func writeTrainingMetrics(events *tensorboard.Writer, step int64, metrics []*tensors.Tensor) error {
-	defer finalizeMetrics(metrics)
-	if len(metrics) != 5 {
-		return fmt.Errorf("training metrics: got %d values, want loss, moving loss, top1, top5, top16", len(metrics))
-	}
-	return writeSelectedMetrics(events, "train", step, []*tensors.Tensor{metrics[0], metrics[2], metrics[3], metrics[4]})
-}
-
-func writeEvaluationMetrics(events *tensorboard.Writer, prefix string, step int64, metrics []*tensors.Tensor) error {
-	defer finalizeMetrics(metrics)
-	if len(metrics) != 4 {
-		return fmt.Errorf("%s metrics: got %d values, want loss, top1, top5, top16", prefix, len(metrics))
-	}
-	return writeSelectedMetrics(events, prefix, step, metrics)
-}
-
-func writeSelectedMetrics(events *tensorboard.Writer, prefix string, step int64, metrics []*tensors.Tensor) error {
-	names := [...]string{"loss", "top1", "top5", "top16"}
-	scalars := make([]tensorboard.Scalar, len(metrics))
-	for index, metric := range metrics {
-		value, err := scalar(metric)
-		if err != nil {
-			return fmt.Errorf("%s %s: %w", prefix, names[index], err)
-		}
-		scalars[index] = tensorboard.Scalar{Tag: prefix + "/" + names[index], Value: value}
-	}
-	if err := events.WriteScalars(step, scalars...); err != nil {
-		return fmt.Errorf("write %s metrics: %w", prefix, err)
-	}
-	return nil
-}
-
-func finalizeMetrics(metrics []*tensors.Tensor) {
-	for _, metric := range metrics {
-		if metric != nil {
-			_ = metric.FinalizeAll()
-		}
-	}
-}
-
-func scalar(tensor *tensors.Tensor) (float32, error) {
-	if tensor == nil || tensor.Size() != 1 {
-		return 0, errors.New("metric is not a scalar tensor")
-	}
-	values, err := tensors.CopyFlatData[float32](tensor)
-	if err != nil {
-		return 0, err
-	}
-	return values[0], nil
+	return config, nil
 }

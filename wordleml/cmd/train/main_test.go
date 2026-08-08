@@ -2,54 +2,50 @@ package main
 
 import (
 	"bytes"
-	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
-func TestDryRunPrintsConfigurationWithoutCreatingFiles(t *testing.T) {
-	temporary := t.TempDir()
-	dataDir := filepath.Join(temporary, "vocabulary")
-	t.Setenv("WORDLEML_DATA_DIR", dataDir)
-	var stdout, stderr bytes.Buffer
-	err := run(nil, &stdout, &stderr)
-	if err != nil {
-		t.Fatalf("run dry mode: %v\nstderr: %s", err, stderr.String())
-	}
-	for _, want := range []string{
-		"data_dir=" + dataDir,
-		"imitation_dir=" + filepath.Join(dataDir, "imitation"),
-		"checkpoint_dir=" + filepath.Join(dataDir, "checkpoints", "first-run"),
-		"tensorboard_dir=" + filepath.Join(dataDir, "tensorboard", "first-run"),
-		"steps=0",
-	} {
-		if !strings.Contains(stdout.String(), want) {
-			t.Errorf("dry-run output %q does not contain %q", stdout.String(), want)
-		}
-	}
-	for _, path := range []string{
-		dataDir,
-		filepath.Join(dataDir, "checkpoints", "first-run"),
-		filepath.Join(dataDir, "tensorboard", "first-run"),
-	} {
-		if _, err := os.Stat(path); !os.IsNotExist(err) {
-			t.Errorf("dry run created %q: %v", path, err)
+func TestParseConfigRequiresFixedRunIdentityAndStage(t *testing.T) {
+	for _, args := range [][]string{nil, {"-run-id=proof"}, {"-stage=mini"}, {"-run-id=proof", "-stage=unknown"}} {
+		var stderr bytes.Buffer
+		if _, err := parseConfig(args, &stderr); err == nil {
+			t.Errorf("parseConfig(%q) succeeded", args)
 		}
 	}
 }
 
-func TestRunRejectsInvalidTrainingFlags(t *testing.T) {
-	for _, args := range [][]string{
-		{"-batch-size=0"},
-		{"-learning-rate=0"},
-		{"-learning-rate=NaN"},
-		{"-seed=0"},
-		{"-steps=-1"},
-	} {
-		var stdout, stderr bytes.Buffer
-		if err := run(args, &stdout, &stderr); err == nil {
-			t.Errorf("run(%q) succeeded, want validation error", args)
-		}
+func TestParseConfigUsesOnlyFixedProofFlags(t *testing.T) {
+	var stderr bytes.Buffer
+	config, err := parseConfig([]string{"-data-dir=/frozen", "-runs-dir=/runs", "-run-id=mini-resume", "-stage=mini", "-stop-at=500"}, &stderr)
+	if err != nil {
+		t.Fatalf("parseConfig: %v", err)
+	}
+	if config.dataDir != "/frozen" || config.runsDir != "/runs" || config.runID != "mini-resume" || config.stage != "mini" || config.stopAt != 500 {
+		t.Fatalf("config = %#v", config)
+	}
+	if _, err := parseConfig([]string{"-data-dir=" + filepath.Join(t.TempDir(), "data"), "-run-id=bad", "-stage=mini", "-steps=10"}, &stderr); err == nil {
+		t.Fatal("obsolete -steps flag was accepted")
+	}
+}
+
+func TestParseConfigDefaultsRunsBesideDataOrUsesEnvironment(t *testing.T) {
+	t.Setenv("WORDLEML_DATA_DIR", "/workspace/data")
+	t.Setenv("WORDLEML_RUNS_DIR", "")
+	var stderr bytes.Buffer
+	config, err := parseConfig([]string{"-run-id=full-proof", "-stage=full"}, &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.runsDir != "/workspace/runs" {
+		t.Fatalf("default runs directory = %q, want /workspace/runs", config.runsDir)
+	}
+	t.Setenv("WORDLEML_RUNS_DIR", "/mounted-runs")
+	config, err = parseConfig([]string{"-run-id=full-proof", "-stage=full"}, &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.runsDir != "/mounted-runs" {
+		t.Fatalf("environment runs directory = %q", config.runsDir)
 	}
 }

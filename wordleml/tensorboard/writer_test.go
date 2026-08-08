@@ -89,12 +89,76 @@ func TestWriterRejectsOperationsAfterClose(t *testing.T) {
 	}
 	for name, operation := range map[string]func() error{
 		"WriteScalars": func() error { return w.WriteScalars(1, tensorboard.Scalar{Tag: "loss", Value: 1}) },
-		"Flush":        w.Flush,
-		"Close":        w.Close,
+		"WriteHistograms": func() error {
+			return w.WriteHistograms(1, tensorboard.Histogram{Tag: "logits", Values: []float64{1}})
+		},
+		"Flush": w.Flush,
+		"Close": w.Close,
 	} {
 		if err := operation(); !errors.Is(err, tensorboard.ErrClosed) {
 			t.Errorf("%s() error = %v, want ErrClosed", name, err)
 		}
+	}
+}
+
+func TestWriterWritesTensorBoardHistogramEvents(t *testing.T) {
+	logDir := t.TempDir()
+	w, err := tensorboard.New(logDir)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := w.Close(); err != nil && !errors.Is(err, tensorboard.ErrClosed) {
+			t.Errorf("Close() error = %v", err)
+		}
+	})
+
+	if err := w.WriteHistograms(23,
+		tensorboard.Histogram{Tag: "model/logits", Values: []float64{-2, 0, 0, 3}},
+		tensorboard.Histogram{Tag: "empty", Values: []float64{math.NaN(), math.Inf(1), math.Inf(-1)}},
+	); err != nil {
+		t.Fatalf("WriteHistograms() error = %v", err)
+	}
+	if err := w.Flush(); err != nil {
+		t.Fatalf("Flush() error = %v", err)
+	}
+
+	paths, err := filepath.Glob(filepath.Join(logDir, "events.out.tfevents.*"))
+	if err != nil || len(paths) != 1 {
+		t.Fatalf("event files = %v, %v; want one file", paths, err)
+	}
+	records := readRecords(t, paths[0])
+	if len(records) != 2 {
+		t.Fatalf("records = %d, want 2", len(records))
+	}
+	event := parseEvent(t, records[1])
+	if event.step != 23 {
+		t.Fatalf("step = %d, want 23", event.step)
+	}
+	if len(event.histograms) != 2 {
+		t.Fatalf("histograms = %d, want 2", len(event.histograms))
+	}
+
+	got := event.histograms[0]
+	if got.tag != "model/logits" {
+		t.Errorf("histogram tag = %q, want model/logits", got.tag)
+	}
+	if got.minimum != -2 || got.maximum != 3 || got.count != 4 || got.sum != 1 || got.sumSquares != 13 {
+		t.Errorf("histogram fields = min=%v max=%v count=%v sum=%v sumSquares=%v, want -2, 3, 4, 1, 13", got.minimum, got.maximum, got.count, got.sum, got.sumSquares)
+	}
+	if want := []float64{-2, 0, 3}; !equalFloat64s(got.bucketLimits, want) {
+		t.Errorf("bucket limits = %v, want %v", got.bucketLimits, want)
+	}
+	if want := []float64{1, 2, 1}; !equalFloat64s(got.buckets, want) {
+		t.Errorf("buckets = %v, want %v", got.buckets, want)
+	}
+
+	empty := event.histograms[1]
+	if empty.tag != "empty" || empty.minimum != 0 || empty.maximum != 0 || empty.count != 0 || empty.sum != 0 || empty.sumSquares != 0 {
+		t.Errorf("empty histogram = %+v, want a zero-sized histogram", empty)
+	}
+	if len(empty.bucketLimits) != 0 || len(empty.buckets) != 0 {
+		t.Errorf("empty buckets = limits %v counts %v, want none", empty.bucketLimits, empty.buckets)
 	}
 }
 
@@ -103,11 +167,23 @@ type parsedEvent struct {
 	step        int64
 	fileVersion string
 	scalars     []parsedScalar
+	histograms  []parsedHistogram
 }
 
 type parsedScalar struct {
 	tag   string
 	value float32
+}
+
+type parsedHistogram struct {
+	tag          string
+	minimum      float64
+	maximum      float64
+	count        float64
+	sum          float64
+	sumSquares   float64
+	bucketLimits []float64
+	buckets      []float64
 }
 
 func readRecords(t *testing.T, path string) [][]byte {
@@ -173,32 +249,47 @@ func parseEvent(t *testing.T, data []byte) parsedEvent {
 			if wireType != 2 {
 				t.Fatalf("event summary has wire type %d", wireType)
 			}
-			event.scalars = parseSummary(t, value)
+			summary := parseSummary(t, value)
+			event.scalars = summary.scalars
+			event.histograms = summary.histograms
 		}
 		data = rest
 	}
 	return event
 }
 
-func parseSummary(t *testing.T, data []byte) []parsedScalar {
+type parsedSummary struct {
+	scalars    []parsedScalar
+	histograms []parsedHistogram
+}
+
+func parseSummary(t *testing.T, data []byte) parsedSummary {
 	t.Helper()
-	var scalars []parsedScalar
+	var summary parsedSummary
 	for len(data) > 0 {
 		field, wireType, value, rest := parseField(t, data)
 		if field == 1 {
 			if wireType != 2 {
 				t.Fatalf("summary value has wire type %d", wireType)
 			}
-			scalars = append(scalars, parseScalar(t, value))
+			scalar, histogram := parseSummaryValue(t, value)
+			if scalar != nil {
+				summary.scalars = append(summary.scalars, *scalar)
+			}
+			if histogram != nil {
+				summary.histograms = append(summary.histograms, *histogram)
+			}
 		}
 		data = rest
 	}
-	return scalars
+	return summary
 }
 
-func parseScalar(t *testing.T, data []byte) parsedScalar {
+func parseSummaryValue(t *testing.T, data []byte) (*parsedScalar, *parsedHistogram) {
 	t.Helper()
-	var scalar parsedScalar
+	var tag string
+	var scalar *parsedScalar
+	var histogram *parsedHistogram
 	for len(data) > 0 {
 		field, wireType, value, rest := parseField(t, data)
 		switch field {
@@ -206,16 +297,71 @@ func parseScalar(t *testing.T, data []byte) parsedScalar {
 			if wireType != 2 {
 				t.Fatalf("scalar tag has wire type %d", wireType)
 			}
-			scalar.tag = string(value)
+			tag = string(value)
 		case 2:
 			if wireType != 5 || len(value) != 4 {
 				t.Fatalf("scalar simple_value has wire type %d and length %d", wireType, len(value))
 			}
-			scalar.value = math.Float32frombits(binary.LittleEndian.Uint32(value))
+			scalar = &parsedScalar{tag: tag, value: math.Float32frombits(binary.LittleEndian.Uint32(value))}
+		case 6:
+			if wireType != 2 {
+				t.Fatalf("histogram has wire type %d", wireType)
+			}
+			parsed := parseHistogram(t, value)
+			parsed.tag = tag
+			histogram = &parsed
 		}
 		data = rest
 	}
-	return scalar
+	if scalar != nil {
+		scalar.tag = tag
+	}
+	if histogram != nil {
+		histogram.tag = tag
+	}
+	return scalar, histogram
+}
+
+func parseHistogram(t *testing.T, data []byte) parsedHistogram {
+	t.Helper()
+	var histogram parsedHistogram
+	for len(data) > 0 {
+		field, wireType, value, rest := parseField(t, data)
+		if wireType != 1 || len(value) != 8 {
+			t.Fatalf("histogram field %d has wire type %d and length %d", field, wireType, len(value))
+		}
+		decoded := math.Float64frombits(binary.LittleEndian.Uint64(value))
+		switch field {
+		case 1:
+			histogram.minimum = decoded
+		case 2:
+			histogram.maximum = decoded
+		case 3:
+			histogram.count = decoded
+		case 4:
+			histogram.sum = decoded
+		case 5:
+			histogram.sumSquares = decoded
+		case 6:
+			histogram.bucketLimits = append(histogram.bucketLimits, decoded)
+		case 7:
+			histogram.buckets = append(histogram.buckets, decoded)
+		}
+		data = rest
+	}
+	return histogram
+}
+
+func equalFloat64s(got, want []float64) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if math.Float64bits(got[i]) != math.Float64bits(want[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 func parseField(t *testing.T, data []byte) (int, int, []byte, []byte) {

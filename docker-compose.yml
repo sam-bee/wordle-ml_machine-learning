@@ -24,7 +24,9 @@ services:
       - "127.0.0.1:${TENSORBOARD_HOST_PORT:-6007}:6006"
     volumes:
       - type: bind
-        source: ./data/tensorboard
+        # Proof runs write one self-contained event directory per run.  Mount
+        # the parent so TensorBoard can show and compare all of them.
+        source: ./runs
         target: /logs
         read_only: true
     restart: unless-stopped
@@ -42,17 +44,28 @@ services:
       - type: bind
         source: .
         target: /workspace
+      - type: bind
+        source: ../wordle-ml_synthetic-data-creation
+        target: /dependencies/wordle-ml_synthetic-data-creation
+        read_only: true
+      - type: bind
+        source: ../wordle-ml_game-engine
+        target: /dependencies/wordle-ml_game-engine
+        read_only: true
     environment:
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
       GOMLX_BACKEND: xla:cuda
       GOMLX_NO_AUTO_INSTALL: "1"
       WORDLEML_DATA_DIR: /workspace/data
+      WORDLEML_MACHINE_LEARNING_REPO_DIR: /workspace
+      WORDLEML_SYNTHETIC_REPO_DIR: /dependencies/wordle-ml_synthetic-data-creation
+      WORDLEML_GAME_ENGINE_REPO_DIR: /dependencies/wordle-ml_game-engine
     deploy:
       resources:
         reservations:
           devices:
             - driver: nvidia
-              device_ids: ["${NVIDIA_GPU_DEVICE_ID:?Set NVIDIA_GPU_DEVICE_ID in .env to the RTX 5070 Ti UUID}"]
+              device_ids: ["${NVIDIA_GPU_DEVICE_ID:?Set NVIDIA_GPU_DEVICE_ID in .env to one approved RTX 5070 Ti or RTX 5050 UUID}"]
               capabilities: [gpu]
     init: true
     stdin_open: true
