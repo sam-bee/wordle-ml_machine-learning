@@ -43,6 +43,11 @@ gradually and keep the Wordle problem visible throughout, rather than turning in
 
 - Start with the four model-facing tensors rather than raw coloured tiles: the remaining-solution mask, 209 aggregate
   candidate statistics, a turn index, and a mask showing which actions are still possible solutions.
+- Show the tiny shared encoder boundary: a 289-byte LSB-first remaining-solution bitset and one turn become those four
+  tensors. The same code serves generated training records and later live play, so the demo cannot quietly train on one
+  representation and play with another.
+- Freeze word IDs with the five checked-in lists and their normalized SHA-256 hashes. This makes a dataset's "word 17"
+  verifiable instead of an accidental consequence of whichever dictionary happened to be loaded.
 - Normalize the 2,309-value candidate mask by its row sum. Its 96-value linear projection can then be explained as a
   learned mean over the remaining candidates; the separate log candidate-count statistic restores information about
   whether that set contains two words or two thousand.

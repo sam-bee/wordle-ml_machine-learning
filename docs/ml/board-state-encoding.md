@@ -1,7 +1,18 @@
 # Model-facing Wordle state
 
-The policy does not consume the coloured board or raw letters directly. A future data/state component will translate a
-board into four tensors; the current model treats all four as precomputed inputs and does not implement that translation.
+The shared `wordleml/modelstate` package is the sole host-side encoder for both training records and future live play.
+It accepts a 289-byte, LSB-first bitset over the canonical solution IDs plus a turn from zero through five. It rejects
+empty sets and non-zero padding bits, then produces the four values consumed by `policy.Model.Forward`:
+
+- FP32 `CandidateMask[2309]`;
+- FP32 `CandidateStats[209]`;
+- int32 `Turn`;
+- FP32 `RemainingActionMask[4739]`.
+
+`wordleml/vocabulary.Load(dataDir)` loads the five fixed files in `data/`, preserves their file order as the canonical
+IDs, validates the 4,739/2,309 vocabulary dimensions and the disjoint 2,109/100/100 split, and maps every solution ID
+to its action ID. `Vocabulary.Hashes()` exposes SHA-256 hashes over normalized uppercase words, one newline per word, for
+dataset metadata checks.
 
 `candidateMask` identifies which of the 2,309 solution words remain compatible with all feedback. The model divides this
 mask by the number of candidates before its first linear layer. Each of that layer's 96 outputs is therefore a learned
@@ -12,6 +23,10 @@ mean over the remaining solution set, rather than a sum whose scale grows with t
 - 130 frequencies for each of 26 letters at each of five positions;
 - 78 frequencies for each letter occurring at least one, two, or three times in a candidate word;
 - one normalized logarithmic candidate-count feature.
+
+The first 130 values are position-major (`position * 26 + letter`). The next 78 are letter-major
+(`130 + letter * 3 + threshold - 1`) for thresholds one, two, and three. Each is a fraction of the remaining candidates;
+the final value is `log(candidateCount) / log(2309)`.
 
 These statistics retain useful letter and multiplicity information after the much larger candidate mask is compressed.
 The candidate count is included explicitly because normalizing `candidateMask` removes its magnitude.
