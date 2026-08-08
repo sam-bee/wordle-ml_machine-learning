@@ -5,6 +5,7 @@ package imitationdata
 import (
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"iter"
 	"math/rand"
@@ -47,6 +48,7 @@ type Data struct {
 // candidate bonus input, while AvailableActionMask only excludes guesses that
 // already appear in History.
 type Example struct {
+	RecordIndex         int
 	Record              synthetic.Record
 	CandidateMask       []float32
 	CandidateStats      []float32
@@ -54,6 +56,7 @@ type Example struct {
 	RemainingActionMask []float32
 	AvailableActionMask []float32
 	TeacherTopAction    int32
+	TeacherTopActions   [16]int32
 }
 
 // Load reads and validates the binary dataset and its required JSON sidecar.
@@ -136,7 +139,18 @@ func (d *Data) Example(index int) (Example, error) {
 	for historyIndex := 0; historyIndex < int(record.TurnDepth); historyIndex++ {
 		available[record.History[historyIndex].GuessID] = 0
 	}
+	var teacherTopActions [16]int32
+	for rank, actionID := range record.TopKActionIDs {
+		teacherTopActions[rank] = int32(actionID)
+		if actionID >= vocabulary.NumActions {
+			return Example{}, fmt.Errorf("record %d teacher action at rank %d is outside the vocabulary: %d", index, rank+1, actionID)
+		}
+		if available[actionID] == 0 {
+			return Example{}, fmt.Errorf("record %d teacher action at rank %d was already guessed: %d", index, rank+1, actionID)
+		}
+	}
 	return Example{
+		RecordIndex:         index,
 		Record:              record,
 		CandidateMask:       inputs.CandidateMask,
 		CandidateStats:      inputs.CandidateStats,
@@ -144,7 +158,35 @@ func (d *Data) Example(index int) (Example, error) {
 		RemainingActionMask: inputs.RemainingActionMask,
 		AvailableActionMask: available,
 		TeacherTopAction:    int32(record.TopKActionIDs[0]),
+		TeacherTopActions:   teacherTopActions,
 	}, nil
+}
+
+// FindOpening returns the single empty-board training example. Other splits do
+// not contain it. A malformed training split with zero or multiple openings is
+// rejected rather than silently weakening opening-state sampling.
+func (d *Data) FindOpening() (Example, bool, error) {
+	openingIndex := -1
+	for index, record := range d.records {
+		if record.SolutionID != synthetic.OpeningSolutionID {
+			continue
+		}
+		if openingIndex >= 0 {
+			return Example{}, false, fmt.Errorf("split %s contains multiple opening records", d.split)
+		}
+		openingIndex = index
+	}
+	if openingIndex < 0 {
+		if d.split == Train {
+			return Example{}, false, errors.New("training split contains no opening record")
+		}
+		return Example{}, false, nil
+	}
+	opening, err := d.Example(openingIndex)
+	if err != nil {
+		return Example{}, false, err
+	}
+	return opening, true, nil
 }
 
 // IndexOrder returns every record index in a deterministic shuffled order.
@@ -164,9 +206,185 @@ func (d *Data) Dataset(seed int64) train.Dataset {
 
 // Batch is the thin standard GoMLX batching wrapper for this package's
 // unbatched Dataset. Its five inputs have shapes [B,2309], [B,209], [B],
-// [B,4739], [B,4739], and its label has shape [B,1].
+// [B,4739], [B,4739], and its loss label has shape [B,1]. The proof
+// runner uses MaterializeBatch when it also needs the teacher's top 16.
 func Batch(backend compute.Backend, source train.Dataset, batchSize int, dropIncomplete bool) train.Dataset {
 	return gomlxdataset.Batch(backend, source, batchSize, true, dropIncomplete)
+}
+
+// Cursor identifies the next non-opening source record in a deterministic
+// shuffled epoch. Offset counts records after the source's opening record has
+// been removed from the order.
+type Cursor struct {
+	Epoch  int64 `json:"epoch"`
+	Offset int   `json:"offset"`
+}
+
+// TrainingSampler builds fixed-size batches with the empty-board example in
+// the first slot and shuffled source records in every other slot. Its cursor is
+// sufficient to reproduce the exact next examples after a restart.
+type TrainingSampler struct {
+	source    *Data
+	opening   Example
+	batchSize int
+	seed      int64
+	cursor    Cursor
+	order     []int
+}
+
+// NewTrainingSampler creates a sampler at cursor. The source may be the mini
+// split (which has no opening) or the full training split (whose own opening is
+// removed before shuffling).
+func NewTrainingSampler(source *Data, opening Example, batchSize int, seed int64, cursor Cursor) (*TrainingSampler, error) {
+	if source == nil {
+		return nil, errors.New("training source must not be nil")
+	}
+	if source.split != Train && source.split != Mini {
+		return nil, fmt.Errorf("split %s cannot be used as a training source", source.split)
+	}
+	if opening.Record.SolutionID != synthetic.OpeningSolutionID || opening.Record.TurnDepth != 0 {
+		return nil, errors.New("opening example is not the empty-board record")
+	}
+	if len(opening.CandidateMask) != vocabulary.NumSolutions ||
+		len(opening.CandidateStats) != modelstate.CandidateStatsSize ||
+		len(opening.RemainingActionMask) != vocabulary.NumActions ||
+		len(opening.AvailableActionMask) != vocabulary.NumActions {
+		return nil, errors.New("opening example has invalid fixed input dimensions")
+	}
+	if batchSize < 2 {
+		return nil, fmt.Errorf("training batch size must be at least 2, got %d", batchSize)
+	}
+	if seed == 0 {
+		return nil, errors.New("training shuffle seed must not be zero")
+	}
+	if cursor.Epoch < 0 || cursor.Offset < 0 {
+		return nil, fmt.Errorf("training cursor must not be negative: %+v", cursor)
+	}
+	sampler := &TrainingSampler{
+		source:    source,
+		opening:   opening,
+		batchSize: batchSize,
+		seed:      seed,
+		cursor:    cursor,
+	}
+	sampler.order = sampler.orderForEpoch(cursor.Epoch)
+	if len(sampler.order) < batchSize-1 {
+		return nil, fmt.Errorf("training source has %d non-opening records, need at least %d", len(sampler.order), batchSize-1)
+	}
+	if cursor.Offset > len(sampler.order) {
+		return nil, fmt.Errorf("training cursor offset %d exceeds epoch size %d", cursor.Offset, len(sampler.order))
+	}
+	sampler.normalizeCursor()
+	return sampler, nil
+}
+
+// Cursor returns the normalized position of the next non-opening example.
+func (s *TrainingSampler) Cursor() Cursor {
+	return s.cursor
+}
+
+// Next returns one batch's examples and advances the sampler. The first value
+// is always the opening; the remaining values follow the shuffled source
+// sequence, crossing epoch boundaries without dropping records.
+func (s *TrainingSampler) Next() ([]Example, error) {
+	examples := make([]Example, s.batchSize)
+	examples[0] = s.opening
+	for index := 1; index < len(examples); index++ {
+		recordIndex := s.nextRecordIndex()
+		example, err := s.source.Example(recordIndex)
+		if err != nil {
+			return nil, err
+		}
+		if example.Record.SolutionID == synthetic.OpeningSolutionID {
+			return nil, fmt.Errorf("internal error: shuffled source returned opening record %d", recordIndex)
+		}
+		examples[index] = example
+	}
+	return examples, nil
+}
+
+// Peek returns the next 20 non-opening source record indices without changing
+// the sampler. Checkpoints record this short sequence to audit exact resume.
+func (s *TrainingSampler) Peek() []int {
+	clone := *s
+	clone.order = append([]int(nil), s.order...)
+	indices := make([]int, 20)
+	for index := range indices {
+		indices[index] = clone.nextRecordIndex()
+	}
+	return indices
+}
+
+func (s *TrainingSampler) nextRecordIndex() int {
+	s.normalizeCursor()
+	recordIndex := s.order[s.cursor.Offset]
+	s.cursor.Offset++
+	s.normalizeCursor()
+	return recordIndex
+}
+
+func (s *TrainingSampler) normalizeCursor() {
+	for s.cursor.Offset == len(s.order) {
+		s.cursor.Epoch++
+		s.cursor.Offset = 0
+		s.order = s.orderForEpoch(s.cursor.Epoch)
+	}
+}
+
+func (s *TrainingSampler) orderForEpoch(epoch int64) []int {
+	shuffled := s.source.IndexOrder(s.seed + epoch)
+	order := make([]int, 0, len(shuffled))
+	for _, recordIndex := range shuffled {
+		if s.source.records[recordIndex].SolutionID != synthetic.OpeningSolutionID {
+			order = append(order, recordIndex)
+		}
+	}
+	return order
+}
+
+// MaterializeBatch copies expanded examples into the fixed tensors consumed
+// by the policy. It returns independent backing storage because Trainer may
+// donate and finalize every tensor in the returned batch.
+func MaterializeBatch(examples []Example) (train.Batch, error) {
+	if len(examples) == 0 {
+		return train.Batch{}, errors.New("cannot materialize an empty batch")
+	}
+	batchSize := len(examples)
+	candidateMasks := make([]float32, batchSize*vocabulary.NumSolutions)
+	candidateStats := make([]float32, batchSize*modelstate.CandidateStatsSize)
+	turns := make([]int32, batchSize)
+	remainingMasks := make([]float32, batchSize*vocabulary.NumActions)
+	availableMasks := make([]float32, batchSize*vocabulary.NumActions)
+	teacherTop1 := make([]int32, batchSize)
+	teacherTop16 := make([]int32, batchSize*16)
+	for index, example := range examples {
+		if len(example.CandidateMask) != vocabulary.NumSolutions ||
+			len(example.CandidateStats) != modelstate.CandidateStatsSize ||
+			len(example.RemainingActionMask) != vocabulary.NumActions ||
+			len(example.AvailableActionMask) != vocabulary.NumActions {
+			return train.Batch{}, fmt.Errorf("example %d has invalid fixed input dimensions", index)
+		}
+		copy(candidateMasks[index*vocabulary.NumSolutions:], example.CandidateMask)
+		copy(candidateStats[index*modelstate.CandidateStatsSize:], example.CandidateStats)
+		turns[index] = example.Turn
+		copy(remainingMasks[index*vocabulary.NumActions:], example.RemainingActionMask)
+		copy(availableMasks[index*vocabulary.NumActions:], example.AvailableActionMask)
+		teacherTop1[index] = example.TeacherTopAction
+		copy(teacherTop16[index*16:], example.TeacherTopActions[:])
+	}
+	return train.Batch{
+		Inputs: []*tensors.Tensor{
+			tensors.FromFlatDataAndDimensions(candidateMasks, batchSize, vocabulary.NumSolutions),
+			tensors.FromFlatDataAndDimensions(candidateStats, batchSize, modelstate.CandidateStatsSize),
+			tensors.FromFlatDataAndDimensions(turns, batchSize),
+			tensors.FromFlatDataAndDimensions(remainingMasks, batchSize, vocabulary.NumActions),
+			tensors.FromFlatDataAndDimensions(availableMasks, batchSize, vocabulary.NumActions),
+		},
+		Labels: []*tensors.Tensor{
+			tensors.FromFlatDataAndDimensions(teacherTop1, batchSize, 1),
+			tensors.FromFlatDataAndDimensions(teacherTop16, batchSize, 16),
+		},
+	}, nil
 }
 
 type dataset struct {
