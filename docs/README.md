@@ -5,5 +5,5 @@ introduction for a person or agent, not a replacement for looking through the co
 Current project documentation:
 
 - [`development.md`](development.md) describes the Docker development stack and its smoke tests.
-- [`data/overview-of-wordlists.md`](data/overview-of-wordlists.md) covers candidate Wordle data sources.
+- [`data/overview-of-wordlists.md`](data/overview-of-wordlists.md) documents the model vocabularies and their provenance.
 - [`ml/model-structure.md`](ml/model-structure.md) is reserved for the model design once it exists.
