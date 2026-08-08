@@ -39,7 +39,28 @@ gradually and keep the Wordle problem visible throughout, rather than turning in
 - Keep the full 2,309-word backup alongside the fixed split. Repeatedly consulting the final test set turns human
   judgement into another way of overfitting.
 
+## A compact policy model
+
+- Start with the four model-facing tensors rather than raw coloured tiles: the remaining-solution mask, 209 aggregate
+  candidate statistics, a turn index, and a mask showing which actions are still possible solutions.
+- Normalize the 2,309-value candidate mask by its row sum. Its 96-value linear projection can then be explained as a
+  learned mean over the remaining candidates; the separate log candidate-count statistic restores information about
+  whether that set contains two words or two thousand.
+- Project the statistics to 48 values and embed the six possible turns into 16 values. Concatenating `96 + 48 + 16`
+  produces a 160-value state without needing a learned skip-path projection.
+- Use one two-layer residual block at width 160. This is enough structure to introduce activations, hidden features,
+  residual connections, and trainable weights without making a one-hour Go talk about an oversized architecture.
+- Produce 4,739 ordinary action logits, then learn one scalar candidate bonus per state. Adding that scalar only at
+  actions which remain solutions gives the network an explicit exploit-versus-probe control.
+- Emphasise that the candidate-action mask is not a hard-mode or legality mask. A probe word retains its ordinary logit;
+  it is never replaced with negative infinity merely because it cannot be the answer.
+- Count the weights in front of the audience: `96S + 161A + 61,953`. With the actual vocabularies this is 1,046,596
+  FP32 parameters, just under 4 MiB of weights. The output layer accounts for most of them, which makes the fixed action
+  vocabulary an architectural decision rather than just a data detail.
+- Keep softmax, loss, optimisation, teacher generation, and gameplay out of this first model diagram. Raw logits are the
+  clean boundary to those later parts of the story.
+
 ## Later structure
 
-[To be expanded alongside the model: Wordle data and encoding, first baseline, loss and optimisation, Go/CUDA boundary,
-training results, failures and lessons, live visualisation, and conclusion.]
+[To be expanded alongside training: first baseline, loss and optimisation, Go/CUDA boundary, training results, failures
+and lessons, live visualisation, and conclusion.]

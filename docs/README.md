@@ -6,4 +6,5 @@ Current project documentation:
 
 - [`development.md`](development.md) describes the Docker development stack and its smoke tests.
 - [`data/overview-of-wordlists.md`](data/overview-of-wordlists.md) documents the model vocabularies and their provenance.
-- [`ml/model-structure.md`](ml/model-structure.md) is reserved for the model design once it exists.
+- [`ml/model-structure.md`](ml/model-structure.md) describes the GoMLX policy architecture and parameter count.
+- [`ml/board-state-encoding.md`](ml/board-state-encoding.md) describes the four precomputed tensors consumed by the model.
