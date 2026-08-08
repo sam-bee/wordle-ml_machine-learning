@@ -1,0 +1,1 @@
+[discuss how board state is encoded when giving it to the model to take its turn]
