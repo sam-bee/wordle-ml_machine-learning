@@ -1192,13 +1192,40 @@ func validateManifestIdentity(layout runstate.Layout, dataDir string, config Con
 	if err != nil {
 		return err
 	}
-	// Collection time is the sole intentionally changing field. Every input
-	// identity, hash, commit, runtime fact, and effective config must agree.
-	current.CollectedAt = stored.CollectedAt
-	if !reflect.DeepEqual(stored, current) {
+	same, err := manifestsHaveSameIdentity(stored, current)
+	if err != nil {
+		return fmt.Errorf("compare immutable run metadata: %w", err)
+	}
+	if !same {
 		return errors.New("current run inputs or environment do not match immutable metadata.json")
 	}
 	return nil
+}
+
+// manifestsHaveSameIdentity compares semantic manifest values. metadata.json
+// is indented on disk, and json.RawMessage preserves that indentation when it
+// is decoded. Comparing the raw EffectiveConfig bytes would therefore reject
+// every otherwise-identical resume against the compact json.Marshal output
+// collected by the new process.
+func manifestsHaveSameIdentity(stored, current runmetadata.Manifest) (bool, error) {
+	// Collection time is the sole intentionally changing field. Every input
+	// identity, hash, commit, runtime fact, and effective config must agree.
+	current.CollectedAt = stored.CollectedAt
+	for label, manifest := range map[string]*runmetadata.Manifest{
+		"stored":  &stored,
+		"current": &current,
+	} {
+		var configuration any
+		if err := json.Unmarshal(manifest.EffectiveConfig, &configuration); err != nil {
+			return false, fmt.Errorf("decode %s effective config: %w", label, err)
+		}
+		canonical, err := json.Marshal(configuration)
+		if err != nil {
+			return false, fmt.Errorf("canonicalize %s effective config: %w", label, err)
+		}
+		manifest.EffectiveConfig = canonical
+	}
+	return reflect.DeepEqual(stored, current), nil
 }
 
 func repositoryPath(name string) (string, error) {

@@ -5,12 +5,43 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/gomlx/gomlx/core/tensors"
 	"github.com/sam-bee/wordle-ml_machine-learning/imitationdata"
+	"github.com/sam-bee/wordle-ml_machine-learning/runmetadata"
 	"github.com/sam-bee/wordle-ml_machine-learning/runstate"
 	"github.com/sam-bee/wordle-ml_machine-learning/vocabulary"
 )
+
+func TestManifestIdentityComparesEffectiveConfigSemantically(t *testing.T) {
+	collected := time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC)
+	stored := runmetadata.Manifest{
+		SchemaVersion:   runmetadata.SchemaVersion,
+		CollectedAt:     collected,
+		EffectiveConfig: json.RawMessage("{\n  \"seed\": 20260808,\n  \"batch_size\": 128\n}"),
+	}
+	current := stored
+	current.CollectedAt = collected.Add(time.Hour)
+	current.EffectiveConfig = json.RawMessage(`{"batch_size":128,"seed":20260808}`)
+
+	same, err := manifestsHaveSameIdentity(stored, current)
+	if err != nil {
+		t.Fatalf("manifestsHaveSameIdentity: %v", err)
+	}
+	if !same {
+		t.Fatal("semantically identical effective configs differed by formatting or key order")
+	}
+
+	current.Seed = 1
+	same, err = manifestsHaveSameIdentity(stored, current)
+	if err != nil {
+		t.Fatalf("manifestsHaveSameIdentity after mutation: %v", err)
+	}
+	if same {
+		t.Fatal("manifest identity accepted a changed seed")
+	}
+}
 
 func TestTrainingMetricsUseEMALossAndTopKOffsets(t *testing.T) {
 	values := []*tensors.Tensor{
