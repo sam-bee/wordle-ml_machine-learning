@@ -59,6 +59,10 @@ gradually and keep the Wordle problem visible throughout, rather than turning in
   actions which remain solutions gives the network an explicit exploit-versus-probe control.
 - Emphasise that the candidate-action mask is not a hard-mode or legality mask. A probe word retains its ordinary logit;
   it is never replaced with negative infinity merely because it cannot be the answer.
+- For imitation learning, keep a separate availability mask: it starts at one
+  for every action and only clears prior history guesses. This makes the loss
+  prevent duplicate guesses without accidentally teaching the candidate bonus
+  input to behave like a legality rule.
 - Count the weights in front of the audience: `96S + 161A + 61,953`. With the actual vocabularies this is 1,046,596
   FP32 parameters, just under 4 MiB of weights. The output layer accounts for most of them, which makes the fixed action
   vocabulary an architectural decision rather than just a data detail.
