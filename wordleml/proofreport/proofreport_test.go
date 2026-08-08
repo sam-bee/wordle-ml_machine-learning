@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sam-bee/wordle-ml_machine-learning/gameeval"
 	"github.com/sam-bee/wordle-ml_machine-learning/tensorboard"
 )
 
@@ -255,6 +256,29 @@ func TestWritePublishesIncompleteReportWithoutReplacingSuccessfulReport(t *testi
 	}
 	if string(contents) != string(success) {
 		t.Fatalf("failure replaced a successful report:\n%s", contents)
+	}
+}
+
+func TestVerifyJSONLMatchesProductionGameSchema(t *testing.T) {
+	production := gameeval.GameResult{
+		Solution: "ADEPT", Solved: false, Guesses: 6, Failure: "unsolved_after_six_guesses",
+		InvalidSelections: 0, SuppressedRawTopSelections: 1, RepeatedSelections: 1,
+		Turns: []gameeval.TurnResult{{Turn: 1, RawTopActionID: 3303, RawTopGuess: "REPEL", Guess: "REPEL", Feedback: "-YY--", ShortlistSizeBefore: 2309, ShortlistSizeAfter: 34}},
+	}
+	line, err := json.Marshal(production)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "initial-games10.jsonl")
+	if err := os.WriteFile(path, append(line, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var decoded game
+	if err := json.Unmarshal(line, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyJSONL(path, []game{decoded}); err != nil {
+		t.Fatalf("verify production-schema JSONL: %v", err)
 	}
 }
 

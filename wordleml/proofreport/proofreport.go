@@ -524,13 +524,20 @@ type game struct {
 	Solution                   string `json:"solution"`
 	Solved                     bool   `json:"solved"`
 	Guesses                    int    `json:"guesses"`
+	Failure                    string `json:"failure,omitempty"`
 	InvalidSelections          int    `json:"invalid_selections"`
 	RepeatedSelections         int    `json:"repeated_selections"`
 	SuppressedRawTopSelections int    `json:"suppressed_raw_top_selections"`
 	Turns                      []turn `json:"turns"`
 }
 type turn struct {
-	Guess string `json:"guess"`
+	Turn                int    `json:"turn"`
+	RawTopActionID      int    `json:"raw_top_action_id"`
+	RawTopGuess         string `json:"raw_top_guess"`
+	Guess               string `json:"guess"`
+	Feedback            string `json:"feedback"`
+	ShortlistSizeBefore int    `json:"shortlist_size_before"`
+	ShortlistSizeAfter  int    `json:"shortlist_size_after"`
 }
 
 func loadRun(root, id, expectedStage string) (loadedRun, error) {
