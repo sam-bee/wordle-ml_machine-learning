@@ -16,27 +16,65 @@ all 4,739 actions available and clears only previous history guesses. The
 training wrapper applies that mask to raw policy logits before the loss, so
 non-candidate probe words remain playable unless they have already been used.
 
-The initial objective is sparse categorical cross-entropy against the
-teacher's top-ranked action. It uses Adam with a default learning rate of
-0.001 and a deterministic nonzero seed. The first metrics are loss and teacher
+The objective is masked sparse categorical cross-entropy against the teacher's
+top-ranked action. It uses FP32 Adam, global-gradient-norm clipping at 5, and
+the fixed deterministic seed `20260808`. Metrics include loss and teacher
 top-1, top-5, and top-16 agreement. The policy itself still returns raw logits
 and has exactly 1,046,596 FP32 trainable parameters.
 
-Checkpoints make a run resumable, while the `tensorboard` package writes scalar
-TensorBoard event files using only the Go standard library. Generated
-checkpoints and event files are ignored by Git. This plumbing has automated
-tests; no training experiment, learning curve, or model-quality result has
-been produced yet. The first experiment must use train and validation only;
-final test remains sealed until evaluation.
+`cmd/train` selects one fixed proof stage with `-run-id` and `-stage`:
 
-The command defaults to a zero-step dry run, so inspecting its configuration
-does not load data, initialize CUDA, or create output files:
+- `overfit`: 400 updates, batch size 128, learning rate 0.001;
+- `mini`: 1,000 updates, batch size 128, learning rate 0.0003. A fresh mini
+  run **must** stop normally with `-stop-at=500`, then resume the same ID
+  without `-stop-at`;
+- `full`: 2,000 updates, batch size 256, learning rate 0.0003.
+
+Validation and checkpoint cadence are both 100 updates, while training scalar
+telemetry is emitted every 10 updates. The standard-library `tensorboard`
+package writes scalar and histogram event files, including training and
+validation metrics, optimizer diagnostics, shortlist statistics, opening-state
+diagnostics, parameter/logit/beta distributions, and gradient-norm
+distributions.
+
+Runs are self-contained below `runs/<run-id>/`: immutable `config.json` and
+`metadata.json`, `run-state.json`, `training.log`, `final-metrics.json`,
+`events/`, and `checkpoints/{initial,latest,best}`. The initial checkpoint is
+saved at update zero; latest supports resume, while all three named snapshots
+support independent reload.
+
+The runner owns the overfit run-zero baseline: it independently reloads the
+initial checkpoint and records its first 10 validation games in the overfit run
+artifacts. `cmd/evaluate` therefore rejects an attempt to rerun
+`overfit initial games10`. After mini passes, evaluate `mini latest games10`.
+The complete required operator sequence is:
 
 ```console
-docker compose run --rm --no-deps wordleml go run ./cmd/train
+docker compose run --rm --no-deps wordleml go run ./cmd/train -run-id=overfit-001 -stage=overfit
+docker compose run --rm --no-deps wordleml go run ./cmd/train -run-id=mini-001 -stage=mini -stop-at=500
+docker compose run --rm --no-deps wordleml go run ./cmd/train -run-id=mini-001 -stage=mini
+docker compose run --rm --no-deps wordleml go run ./cmd/evaluate -run-id=mini-001 -checkpoint=latest -mode=games10
+docker compose run --rm --no-deps wordleml go run ./cmd/train -run-id=full-001 -stage=full
+docker compose run --rm --no-deps wordleml go run ./cmd/evaluate -run-id=full-001 -checkpoint=initial -mode=games100
+docker compose run --rm --no-deps wordleml go run ./cmd/evaluate -run-id=full-001 -checkpoint=best -mode=games100
+docker compose run --rm --no-deps wordleml go run ./cmd/evaluate -run-id=full-001 -checkpoint=best -mode=ablations
+docker compose run --rm --no-deps wordleml go run ./cmd/report -overfit-run-id=overfit-001 -mini-run-id=mini-001 -full-run-id=full-001 -output=../docs/ml/initial-training-proof-report.md
 ```
 
-An explicit positive `-steps` value enables the bounded training path. It reads
-only train and validation, logs under `data/tensorboard/first-run`, and resumes
-or saves under `data/checkpoints/first-run`. Starting that first experiment is
-deliberately the next task, not part of this implementation phase.
+Results are atomically recorded under `runs/<run-id>/evaluations/`; game
+trajectories are JSONL and game summaries are added to TensorBoard. Finally,
+`cmd/report` consumes the overfit, mini, and full run IDs, validates all proof
+evidence and its four rendered rows (run-zero baseline, overfit, mini, full),
+re-verifies TensorBoard event files for every proof stage and their
+game-summary tags, re-derives the mini run's continuous event proof, then
+atomically writes `docs/ml/initial-training-proof-report.md`. A failed gate
+still produces a clearly marked incomplete report naming the stopped stage and
+reason while the command returns an error; it does not overwrite an existing
+successful report.
+
+The exact train/validation state-overlap audit is retained in every run: 190
+of 2,445 unique validation encoded states also occur in training, and their
+teacher top-1 labels agree. This is state-distribution overlap, not
+solution-split leakage—the frozen solution IDs remain disjoint. No command
+exposes the final-test split. The workflow and its gates are implemented, but
+no successful proof-run result is claimed here.

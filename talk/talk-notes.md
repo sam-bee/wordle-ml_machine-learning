@@ -17,14 +17,16 @@ gradually and keep the Wordle problem visible throughout, rather than turning in
 ## Reproducible starting point
 
 - Begin demonstrations from the same containerised environment used during development.
-- Show that GPU selection is a real engineering concern: the development desktop has two NVIDIA cards, but Compose
-  passes only the RTX 5070 Ti by UUID.
+- Show that GPU selection is a real engineering concern: Compose passes exactly
+  one UUID-selected, approved RTX 5070 Ti or RTX 5050 (including the 5050
+  Laptop GPU name) and rejects every other visible card, including an RTX 3060.
 - Use the small CUDA smoke kernel to make `sm_120`, compute capability 12.0, host/device memory, and kernel launch syntax
   concrete before introducing model code.
 - Follow it with the GoMLX Euclidean-distance graph to introduce symbolic graphs, XLA compilation, and the CUDA backend
   before introducing the full Wordle policy graph.
-- Use the small standard-library TensorBoard writer as a reassuring Go detail: it writes ordinary scalar event files,
-  not a new monitoring system. There are no learning curves yet; those begin with the first experiment.
+- Use the small standard-library TensorBoard writer as a reassuring Go detail:
+  it writes ordinary scalar and histogram event files, not a new monitoring
+  system. Actual learning claims still require a completed, passing proof run.
 
 ## Wordle as a model problem
 
@@ -36,6 +38,10 @@ gradually and keep the Wordle problem visible throughout, rather than turning in
   every possible solution as an action.
 - Split by solution, not by generated game state: 2,109 answers for training, 100 for validation while tuning, and 100
   held back for one final test. This prevents states for the same answer leaking across datasets.
+- Be precise about a known caveat: the solution IDs remain disjoint, but 190
+  of 2,445 unique validation encoded states also occur in training with
+  agreeing teacher labels. Record that as state-distribution overlap, not as
+  solution-split leakage.
 - Keep the full 2,309-word backup alongside the fixed split. Repeatedly consulting the final test set turns human
   judgement into another way of overfitting.
 - Freeze the generated examples as a versioned offline corpus: WDIT v3 release `v0.1.0` contains 52,726 training
@@ -72,18 +78,30 @@ gradually and keep the Wordle problem visible throughout, rather than turning in
 - Keep softmax, loss, optimisation, teacher generation, and gameplay out of this first model diagram. Raw logits are the
   clean boundary to those later parts of the story.
 
-## First supervised run: the next teaching step
+## Fixed supervised proof workflow
 
 - Freeze the teacher corpus before showing optimisation: WDIT v3 generator `v0.1.0` supplies 52,726 training records
   (one is the opening state), 1,600 mini records, and 2,500 each for validation and untouched final test.
 - Show the reader expanding a compact record through the same encoder used for future play. Its extra availability mask
   is separate from the candidate-bonus input and clears only guesses already made.
-- The initial lesson can use one simple target: sparse cross-entropy from the teacher's top-ranked word. Adam starts at
-  learning rate 0.001 with a deterministic nonzero seed; report loss and whether the teacher's first choice appears in
-  the model's top 1, 5, or 16 suggestions.
-- Explain checkpoints and scalar event files as repeatability tools, not evidence of a result. The code has automated
-  plumbing checks, but the first actual run and all claims about its quality come later. Validation guides choices;
-  final test stays sealed.
+- The fixed `overfit`, `mini`, and `full` stages make the demonstration
+  repeatable: their batch sizes, learning rates, update budgets, seed, and
+  checkpoint/validation cadence are recorded in each run rather than chosen on
+  stage.
+- Explain initial/latest/best checkpoints, continuous TensorBoard events, and
+  per-run provenance as repeatability tools, not evidence of a result. A fresh
+  mini run must stop at 500 and resume without its stop flag. The runner owns
+  the overfit run-zero game baseline, rather than asking evaluation to rerun
+  it.
+- After full passes, show the fair same-population comparison: initial 100
+  validation games, best 100 validation games, then best-checkpoint ablations.
+  The report command consumes the three proof run IDs, verifies four rendered
+  rows, re-verifies every stage's TensorBoard event files and game-summary tags,
+  and writes the checked-in Markdown report without rerunning training or
+  evaluation.
+- The implementation supports these proof gates, but the talk must not claim a
+  proof passed until a completed run artifact demonstrates it. Validation guides
+  choices; final test stays sealed.
 
 ## Later structure
 

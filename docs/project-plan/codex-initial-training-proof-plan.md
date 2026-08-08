@@ -68,16 +68,21 @@ During these proof runs, ensure that **one opening-state training example is inc
 
 ## 2. Implement reproducible run directories
 
-Each training run must produce a self-contained run directory, for example:
+Each training run must produce a self-contained run directory. The implemented
+layout refines the original example with the immutable initial checkpoint and
+separate post-checkpoint evaluation artifacts:
 
 ```text
 runs/<run-id>/
     config.json
     metadata.json
+    run-state.json
     events/
     checkpoints/
+        initial/
         latest/
         best/
+    evaluations/
     final-metrics.json
     validation-games.jsonl
     training.log
