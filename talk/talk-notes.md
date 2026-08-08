@@ -23,8 +23,8 @@ gradually and keep the Wordle problem visible throughout, rather than turning in
   concrete before introducing model code.
 - Follow it with the GoMLX Euclidean-distance graph to introduce symbolic graphs, XLA compilation, and the CUDA backend
   before introducing the full Wordle policy graph.
-- Mention TensorBoard and the visualiser only briefly at this stage. Their deliberately empty states make a useful
-  before-and-after contrast once training metrics and gameplay data are implemented.
+- Use the small standard-library TensorBoard writer as a reassuring Go detail: it writes ordinary scalar event files,
+  not a new monitoring system. There are no learning curves yet; those begin with the first experiment.
 
 ## Wordle as a model problem
 
@@ -72,7 +72,20 @@ gradually and keep the Wordle problem visible throughout, rather than turning in
 - Keep softmax, loss, optimisation, teacher generation, and gameplay out of this first model diagram. Raw logits are the
   clean boundary to those later parts of the story.
 
+## First supervised run: the next teaching step
+
+- Freeze the teacher corpus before showing optimisation: WDIT v3 generator `v0.1.0` supplies 52,726 training records
+  (one is the opening state), 1,600 mini records, and 2,500 each for validation and untouched final test.
+- Show the reader expanding a compact record through the same encoder used for future play. Its extra availability mask
+  is separate from the candidate-bonus input and clears only guesses already made.
+- The initial lesson can use one simple target: sparse cross-entropy from the teacher's top-ranked word. Adam starts at
+  learning rate 0.001 with a deterministic nonzero seed; report loss and whether the teacher's first choice appears in
+  the model's top 1, 5, or 16 suggestions.
+- Explain checkpoints and scalar event files as repeatability tools, not evidence of a result. The code has automated
+  plumbing checks, but the first actual run and all claims about its quality come later. Validation guides choices;
+  final test stays sealed.
+
 ## Later structure
 
-[To be expanded alongside training: first baseline, loss and optimisation, Go/CUDA boundary, training results, failures
-and lessons, live visualisation, and conclusion.]
+[To be expanded after the first experiment: baseline, learning curves, Go/CUDA boundary, failures and lessons, live
+visualisation, and conclusion.]

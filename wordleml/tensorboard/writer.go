@@ -46,7 +46,7 @@ func New(logDir string) (*Writer, error) {
 	return w, nil
 }
 
-// WriteScalars writes and flushes one summary event at step.
+// WriteScalars writes one summary event at step.
 func (w *Writer) WriteScalars(step int64, scalars ...Scalar) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -56,7 +56,7 @@ func (w *Writer) WriteScalars(step int64, scalars ...Scalar) error {
 	return w.writeEvent(scalarEvent(step, scalars))
 }
 
-// Flush makes all written events visible to readers.
+// Flush commits all written events to stable storage.
 func (w *Writer) Flush() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -82,10 +82,7 @@ func (w *Writer) Close() error {
 }
 
 func (w *Writer) writeEvent(event []byte) error {
-	if err := writeRecord(w.file, event); err != nil {
-		return err
-	}
-	return w.file.Sync()
+	return writeRecord(w.file, event)
 }
 
 func fileVersionEvent() []byte {

@@ -54,3 +54,12 @@ make down          # stop this project's services
 
 `make tidy` and `make format` also execute the Go tools inside the development container. The generated files remain
 owned by the host UID and GID configured in `.env`.
+
+The inspection and training entry points can also be run directly in that
+container. Training defaults to a side-effect-free zero-step configuration
+check:
+
+```console
+docker compose run --rm --no-deps wordleml go run ./cmd/inspect
+docker compose run --rm --no-deps wordleml go run ./cmd/train
+```
