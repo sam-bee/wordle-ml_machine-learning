@@ -21,6 +21,10 @@ We should, as a general rule, be committing and pushing changes whenever a featu
 In general, the `master` branch should be used for everything. Feature branches should be used only when requested, or
 in exceptional cases.
 
+If you are told to use pull requests, you **must** go away and research the Github 'stacked pull request' feature. It is
+very new - you won't have heard of it - but it is the correct way to manage several PRs which are to be merged in a
+specific order.
+
 ## Systems Administration
 
 In general, agents should not be doing systems administration on the laptop or desktop. Development should generally be
