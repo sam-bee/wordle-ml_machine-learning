@@ -25,6 +25,7 @@ const (
 	DefaultOutput             = "docs/ml/initial-training-proof-report.md"
 	metricTolerance           = 2e-4
 	majorGroupMinimumExamples = 25
+	validationExamples        = 2500
 )
 
 // Options identifies the three completed run directories and the report to
@@ -380,6 +381,7 @@ type validationSnapshot struct {
 }
 
 type validationGroups struct {
+	Examples          int               `json:"examples"`
 	ByTurn            []validationGroup `json:"by_turn"`
 	ByShortlistBucket []validationGroup `json:"by_shortlist_bucket"`
 }
@@ -536,13 +538,12 @@ func loadRun(root, id, expectedStage string) (loadedRun, error) {
 	if relative, err := filepath.Rel(root, dir); err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
 		return loadedRun{}, fmt.Errorf("unsafe run ID %q", id)
 	}
-	for _, path := range []string{"config.json", "metadata.json", "final-metrics.json", "run-state.json", "validation-games.jsonl", "training.log"} {
+	// Load the runner-owned evidence before requiring post-training evaluation
+	// artifacts. A failed stage intentionally has no validation-games.jsonl;
+	// reporting that missing downstream file would hide the gate that stopped
+	// the sequence.
+	for _, path := range []string{"config.json", "metadata.json", "final-metrics.json", "run-state.json", "training.log"} {
 		if err := requireFile(filepath.Join(dir, path)); err != nil {
-			return loadedRun{}, fmt.Errorf("run %q: %w", id, err)
-		}
-	}
-	for _, path := range []string{"events", "checkpoints/initial", "checkpoints/latest", "checkpoints/best", "evaluations"} {
-		if err := requireNonEmptyDirectory(filepath.Join(dir, path)); err != nil {
 			return loadedRun{}, fmt.Errorf("run %q: %w", id, err)
 		}
 	}
@@ -560,7 +561,7 @@ func loadRun(root, id, expectedStage string) (loadedRun, error) {
 	if err := decodeFile(filepath.Join(dir, "final-metrics.json"), &result); err != nil {
 		return loadedRun{}, fmt.Errorf("run %q: decode final metrics: %w", id, err)
 	}
-	if result.Stage != expectedStage || !result.Passed || result.GlobalUpdate != expectedUpdates(expectedStage) {
+	if result.Stage != expectedStage || result.GlobalUpdate != expectedUpdates(expectedStage) {
 		return loadedRun{}, fmt.Errorf("run %q did not complete and pass %s (stage=%q updates=%d passed=%t)", id, expectedStage, result.Stage, result.GlobalUpdate, result.Passed)
 	}
 	if !finiteMetrics(result.InitialValidation) || !finiteMetrics(result.FinalValidation) || !finiteMetrics(result.BestValidation) || !finiteMetrics(result.InitialTraining) || !finiteMetrics(result.FinalTraining) {
@@ -568,6 +569,17 @@ func loadRun(root, id, expectedStage string) (loadedRun, error) {
 	}
 	if err := verifyStageGate(result); err != nil {
 		return loadedRun{}, fmt.Errorf("run %q: recorded %s gate evidence is invalid: %w", id, expectedStage, err)
+	}
+	if !result.Passed {
+		return loadedRun{}, fmt.Errorf("run %q completed %s but did not record a passing result", id, expectedStage)
+	}
+	if err := requireFile(filepath.Join(dir, "validation-games.jsonl")); err != nil {
+		return loadedRun{}, fmt.Errorf("run %q: %w", id, err)
+	}
+	for _, path := range []string{"events", "checkpoints/initial", "checkpoints/latest", "checkpoints/best", "evaluations"} {
+		if err := requireNonEmptyDirectory(filepath.Join(dir, path)); err != nil {
+			return loadedRun{}, fmt.Errorf("run %q: %w", id, err)
+		}
 	}
 	rawMetadata, err := os.ReadFile(filepath.Join(dir, "metadata.json"))
 	if err != nil {
@@ -708,11 +720,17 @@ func verifyMajorGroupLearning(result runResult) error {
 	if stored.MinimumExamples != majorGroupMinimumExamples {
 		return fmt.Errorf("minimum examples %d, want %d", stored.MinimumExamples, majorGroupMinimumExamples)
 	}
-	turns, err := improvedGroupNames(result.InitialValidationDetails.Details.ByTurn, result.BestValidationDetails.Details.ByTurn, stored.MinimumExamples)
+	initialDetails, bestDetails := result.InitialValidationDetails.Details, result.BestValidationDetails.Details
+	if initialDetails.Examples != validationExamples || bestDetails.Examples != validationExamples {
+		return fmt.Errorf("initial/best validation examples are %d/%d, want %d", initialDetails.Examples, bestDetails.Examples, validationExamples)
+	}
+	turnNames := []string{"turn_1", "turn_2", "turn_3", "turn_4", "turn_5", "turn_6"}
+	turns, err := improvedGroupNames(initialDetails.ByTurn, bestDetails.ByTurn, turnNames, validationExamples, stored.MinimumExamples)
 	if err != nil {
 		return fmt.Errorf("turn groups: %w", err)
 	}
-	shortlists, err := improvedGroupNames(result.InitialValidationDetails.Details.ByShortlistBucket, result.BestValidationDetails.Details.ByShortlistBucket, stored.MinimumExamples)
+	shortlistNames := []string{"1", "2-5", "6-20", "21-100", ">100"}
+	shortlists, err := improvedGroupNames(initialDetails.ByShortlistBucket, bestDetails.ByShortlistBucket, shortlistNames, validationExamples, stored.MinimumExamples)
 	if err != nil {
 		return fmt.Errorf("shortlist groups: %w", err)
 	}
@@ -734,19 +752,25 @@ func verifyMajorGroupLearning(result runResult) error {
 	return nil
 }
 
-func improvedGroupNames(initial, best []validationGroup, minimum int) ([]string, error) {
-	if len(initial) == 0 || len(initial) != len(best) {
-		return nil, errors.New("initial and best group details are absent or differ in length")
+func improvedGroupNames(initial, best []validationGroup, names []string, expectedExamples, minimum int) ([]string, error) {
+	if len(initial) != len(names) || len(best) != len(names) {
+		return nil, fmt.Errorf("initial/best group counts are %d/%d, want %d", len(initial), len(best), len(names))
 	}
 	groups := make([]string, 0, len(initial))
+	initialExamples, bestExamples := 0, 0
 	for index, before := range initial {
 		after := best[index]
-		if before.Name == "" || after.Name != before.Name || before.Examples < 0 || after.Examples < 0 || !finite(before.Loss) || !finite(after.Loss) {
+		if before.Name != names[index] || after.Name != names[index] || before.Examples < 0 || after.Examples < 0 || !finite(before.Loss) || !finite(after.Loss) {
 			return nil, fmt.Errorf("invalid group at index %d", index)
 		}
+		initialExamples += before.Examples
+		bestExamples += after.Examples
 		if before.Examples >= minimum && after.Examples >= minimum && after.Loss < before.Loss {
 			groups = append(groups, before.Name)
 		}
+	}
+	if initialExamples != expectedExamples || bestExamples != expectedExamples {
+		return nil, fmt.Errorf("initial/best group examples are %d/%d, want %d", initialExamples, bestExamples, expectedExamples)
 	}
 	return groups, nil
 }

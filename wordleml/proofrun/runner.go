@@ -307,12 +307,16 @@ func Run(options Options, stdout io.Writer) (Result, error) {
 		}
 	}
 	if !resumed {
-		initialValidationDetails, samples, err := evaluateDetailed(session, validationData, opening, func(action int) string {
+		evaluatedInitial, samples, err := evaluateDetailed(session, validationData, opening, func(action int) string {
 			word, _ := vocab.ActionWord(action)
 			return word
 		})
 		if err != nil {
 			return Result{}, fmt.Errorf("initial validation: %w", err)
+		}
+		initialValidationDetails = evaluatedInitial
+		if err := validateValidationSnapshotEvidence(initialValidationDetails, validationData.Len()); err != nil {
+			return Result{}, fmt.Errorf("initial validation evidence: %w", err)
 		}
 		initialValidation = initialValidationDetails.Metrics
 		initialValidationDetails.Update = 0
@@ -380,6 +384,9 @@ func Run(options Options, stdout io.Writer) (Result, error) {
 		bestStep = state.BestValidation.Update
 		bestValidation = previous.BestValidation
 		initialValidationDetails, finalValidationDetails, bestValidationDetails = previous.InitialValidationDetails, previous.FinalValidationDetails, previous.BestValidationDetails
+		if err := validatePriorValidationEvidence(previous, validationData.Len()); err != nil {
+			return Result{}, fmt.Errorf("prior validation evidence: %w", err)
+		}
 		validationSnapshots = append(validationSnapshots, previous.ValidationSnapshots...)
 		telemetryProof = cloneMiniTelemetryProof(previous.TelemetryProof)
 		evaluations = cloneEvaluations(previous.Evaluations)
@@ -497,6 +504,9 @@ func Run(options Options, stdout io.Writer) (Result, error) {
 		}
 		finalValidation = finalValidationDetails.Metrics
 		finalValidationDetails.Update = step
+		if err := validateValidationSnapshotEvidence(finalValidationDetails, validationData.Len()); err != nil {
+			return Result{}, fmt.Errorf("validation evidence at update %d: %w", step, err)
+		}
 		if !finalValidation.Finite() {
 			return Result{}, fmt.Errorf("non-finite validation metrics at update %d", step)
 		}
@@ -927,6 +937,101 @@ func majorGroupLearning(initial, best ValidationSnapshot) MajorGroupLearning {
 		Count:           len(groups),
 		Groups:          groups,
 	}
+}
+
+func validateValidationSnapshotEvidence(snapshot ValidationSnapshot, expectedExamples int) error {
+	if expectedExamples <= 0 {
+		return fmt.Errorf("expected validation examples must be positive, got %d", expectedExamples)
+	}
+	if snapshot.Details.Examples != expectedExamples {
+		return fmt.Errorf("details contain %d examples, want %d", snapshot.Details.Examples, expectedExamples)
+	}
+	detailMetrics := Metrics{
+		Loss:  snapshot.Details.Loss,
+		Top1:  snapshot.Details.Top1Accuracy,
+		Top5:  snapshot.Details.Top5Accuracy,
+		Top16: snapshot.Details.Top16Accuracy,
+	}
+	if !detailMetrics.Finite() || snapshot.Metrics != detailMetrics {
+		return fmt.Errorf("summary metrics %+v differ from finite details %+v", snapshot.Metrics, detailMetrics)
+	}
+	if snapshot.Details.EntropyExamples != expectedExamples || !finiteMetric(snapshot.Details.OutputEntropy) || snapshot.Details.OutputEntropy < 0 ||
+		snapshot.Details.RawArgmaxUnavailable < 0 || snapshot.Details.RawArgmaxUnavailable > expectedExamples || snapshot.Details.MaskedArgmaxViolations != 0 {
+		return errors.New("overall entropy or action-selection counters are invalid")
+	}
+	turnNames := [...]string{"turn_1", "turn_2", "turn_3", "turn_4", "turn_5", "turn_6"}
+	if err := validateValidationGroups("turn", snapshot.Details.ByTurn, turnNames[:], expectedExamples); err != nil {
+		return err
+	}
+	shortlistNames := [...]string{"1", "2-5", "6-20", "21-100", ">100"}
+	if err := validateValidationGroups("shortlist", snapshot.Details.ByShortlistBucket, shortlistNames[:], expectedExamples); err != nil {
+		return err
+	}
+	opening := snapshot.Details.Opening
+	// TeacherRank is the opening teacher action's rank among every legal model
+	// action, not its position in the retained teacher top-16 labels. An
+	// untrained model can therefore assign it a rank well above 16.
+	if !opening.Present || !finiteMetric(opening.Loss) || opening.TeacherRank <= 0 || opening.HighestGuess < 0 {
+		return errors.New("opening-state evidence is absent or invalid")
+	}
+	return nil
+}
+
+func validateValidationGroups(label string, groups []proofmetrics.GroupResult, names []string, expectedExamples int) error {
+	if len(groups) != len(names) {
+		return fmt.Errorf("%s groups = %d, want %d", label, len(groups), len(names))
+	}
+	examples := 0
+	for index, name := range names {
+		group := groups[index]
+		if group.Name != name {
+			return fmt.Errorf("%s group %d = %q, want %q", label, index, group.Name, name)
+		}
+		if group.Examples < 0 || group.EntropyExamples != group.Examples || group.RawArgmaxUnavailable < 0 || group.RawArgmaxUnavailable > group.Examples || group.MaskedArgmaxViolations != 0 ||
+			!finiteMetric(group.Loss) || !finiteMetric(group.Top1Accuracy) || !finiteMetric(group.Top5Accuracy) || !finiteMetric(group.Top16Accuracy) || !finiteMetric(group.OutputEntropy) ||
+			group.Top1Accuracy < 0 || group.Top1Accuracy > 1 || group.Top5Accuracy < 0 || group.Top5Accuracy > 1 || group.Top16Accuracy < 0 || group.Top16Accuracy > 1 || group.OutputEntropy < 0 {
+			return fmt.Errorf("%s group %q has invalid metrics or counters", label, name)
+		}
+		examples += group.Examples
+	}
+	if examples != expectedExamples {
+		return fmt.Errorf("%s groups contain %d examples, want %d", label, examples, expectedExamples)
+	}
+	return nil
+}
+
+func validatePriorValidationEvidence(result Result, expectedExamples int) error {
+	checks := []struct {
+		name     string
+		snapshot ValidationSnapshot
+		metrics  Metrics
+		update   int64
+	}{
+		{"initial", result.InitialValidationDetails, result.InitialValidation, 0},
+		{"final", result.FinalValidationDetails, result.FinalValidation, result.GlobalUpdate},
+		{"best", result.BestValidationDetails, result.BestValidation, result.BestValidationStep},
+	}
+	for _, check := range checks {
+		if err := validateValidationSnapshotEvidence(check.snapshot, expectedExamples); err != nil {
+			return fmt.Errorf("%s snapshot: %w", check.name, err)
+		}
+		if check.snapshot.Metrics != check.metrics || check.snapshot.Update != check.update {
+			return fmt.Errorf("%s snapshot summary or update differs from the top-level result", check.name)
+		}
+	}
+	if len(result.ValidationSnapshots) == 0 {
+		return errors.New("validation snapshot history is empty")
+	}
+	for index, snapshot := range result.ValidationSnapshots {
+		if err := validateValidationSnapshotEvidence(snapshot, expectedExamples); err != nil {
+			return fmt.Errorf("history snapshot %d: %w", index, err)
+		}
+	}
+	return nil
+}
+
+func finiteMetric(value float64) bool {
+	return !math.IsNaN(value) && !math.IsInf(value, 0)
 }
 
 func finalize(values []*tensors.Tensor) {

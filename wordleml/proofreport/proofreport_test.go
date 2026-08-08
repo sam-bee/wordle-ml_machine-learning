@@ -192,6 +192,12 @@ func TestValidateRejectsForgedMajorGroupCountsAndDetails(t *testing.T) {
 				result.BestValidationDetails.Details.ByShortlistBucket[1].Loss = result.InitialValidationDetails.Details.ByShortlistBucket[1].Loss
 			},
 		},
+		{
+			name: "impossible group population",
+			mutate: func(result *runResult) {
+				result.BestValidationDetails.Details.ByTurn[1].Examples++
+			},
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			runs := t.TempDir()
@@ -252,6 +258,35 @@ func TestWritePublishesIncompleteReportWithoutReplacingSuccessfulReport(t *testi
 	}
 }
 
+func TestWriteReportsFailedTrainingGateBeforeMissingEvaluationArtifacts(t *testing.T) {
+	runs := t.TempDir()
+	makeFixtureRun(t, runs, "overfit", "overfit-1", time.Date(2026, 8, 8, 9, 0, 0, 0, time.UTC))
+	makeFixtureRun(t, runs, "mini", "mini-1", time.Date(2026, 8, 8, 10, 0, 0, 0, time.UTC))
+	makeFixtureRun(t, runs, "full", "full-1", time.Date(2026, 8, 8, 11, 0, 0, 0, time.UTC))
+	path := filepath.Join(runs, "full-1", "final-metrics.json")
+	var result runResult
+	decodeFixture(t, path, &result)
+	result.Passed = false
+	result.InitialValidationDetails = validationSnapshot{}
+	writeFixture(t, path, result)
+	if err := os.Remove(filepath.Join(runs, "full-1", "validation-games.jsonl")); err != nil {
+		t.Fatal(err)
+	}
+
+	output := filepath.Join(t.TempDir(), "proof.md")
+	_, err := Write(Options{RunsDir: runs, OverfitRunID: "overfit-1", MiniRunID: "mini-1", FullRunID: "full-1", OutputPath: output})
+	if err == nil || !strings.Contains(err.Error(), "broad-group") || strings.Contains(err.Error(), "validation-games") {
+		t.Fatalf("Write error = %v, want the stopped broad-group gate before downstream artifacts", err)
+	}
+	contents, readErr := os.ReadFile(output)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if text := string(contents); !strings.Contains(text, "broad-group") || strings.Contains(text, "validation-games") {
+		t.Fatalf("incomplete report hid the stopped gate:\n%s", text)
+	}
+}
+
 func makeFixtureRun(t *testing.T, root, stage, id string, collected time.Time) {
 	t.Helper()
 	dir := filepath.Join(root, id)
@@ -271,14 +306,16 @@ func makeFixtureRun(t *testing.T, root, stage, id string, collected time.Time) {
 	meta := map[string]any{"collected_at": collected.Format(time.RFC3339Nano), "repositories": map[string]any{"machine_learning": map[string]string{"commit": "ml-commit"}, "synthetic_data": map[string]string{"commit": "data-commit"}, "game_engine": map[string]string{"commit": "engine-commit"}}}
 	writeFixture(t, filepath.Join(dir, "metadata.json"), meta)
 	initialGroups := validationGroups{
-		ByTurn:            []validationGroup{{Name: "turn_1", Examples: 25, Loss: 8}, {Name: "turn_2", Examples: 25, Loss: 8}, {Name: "turn_3", Examples: 24, Loss: 8}},
-		ByShortlistBucket: []validationGroup{{Name: "1", Examples: 25, Loss: 8}, {Name: "2-5", Examples: 25, Loss: 8}, {Name: "6-20", Examples: 24, Loss: 8}},
+		Examples:          validationExamples,
+		ByTurn:            []validationGroup{{Name: "turn_1", Examples: 0, Loss: 0}, {Name: "turn_2", Examples: 500, Loss: 8}, {Name: "turn_3", Examples: 500, Loss: 8}, {Name: "turn_4", Examples: 500, Loss: 8}, {Name: "turn_5", Examples: 500, Loss: 8}, {Name: "turn_6", Examples: 500, Loss: 8}},
+		ByShortlistBucket: []validationGroup{{Name: "1", Examples: 500, Loss: 8}, {Name: "2-5", Examples: 500, Loss: 8}, {Name: "6-20", Examples: 500, Loss: 8}, {Name: "21-100", Examples: 500, Loss: 8}, {Name: ">100", Examples: 500, Loss: 8}},
 	}
 	bestGroups := validationGroups{
-		ByTurn:            []validationGroup{{Name: "turn_1", Examples: 25, Loss: 4}, {Name: "turn_2", Examples: 25, Loss: 4}, {Name: "turn_3", Examples: 24, Loss: 4}},
-		ByShortlistBucket: []validationGroup{{Name: "1", Examples: 25, Loss: 4}, {Name: "2-5", Examples: 25, Loss: 4}, {Name: "6-20", Examples: 24, Loss: 4}},
+		Examples:          validationExamples,
+		ByTurn:            []validationGroup{{Name: "turn_1", Examples: 0, Loss: 0}, {Name: "turn_2", Examples: 500, Loss: 4}, {Name: "turn_3", Examples: 500, Loss: 4}, {Name: "turn_4", Examples: 500, Loss: 8}, {Name: "turn_5", Examples: 500, Loss: 8}, {Name: "turn_6", Examples: 500, Loss: 8}},
+		ByShortlistBucket: []validationGroup{{Name: "1", Examples: 500, Loss: 4}, {Name: "2-5", Examples: 500, Loss: 4}, {Name: "6-20", Examples: 500, Loss: 8}, {Name: "21-100", Examples: 500, Loss: 8}, {Name: ">100", Examples: 500, Loss: 8}},
 	}
-	result := runResult{Stage: stage, GlobalUpdate: updates, Passed: true, InitialValidation: metrics{Loss: 8, Top1: .1, Top5: .2, Top16: .3}, FinalValidation: metrics{Loss: 4, Top1: .4, Top5: .5, Top16: .6}, BestValidation: metrics{Loss: 4, Top1: .4, Top5: .5, Top16: .6}, InitialTraining: metrics{Loss: 4, Top1: .1, Top5: .2, Top16: .3}, FinalTraining: metrics{Loss: 1, Top1: .9, Top5: .95, Top16: .99}, ValidationImprovements: 2, MajorGroupLearning: majorGroupLearning{MinimumExamples: 25, TurnCount: 2, TurnGroups: []string{"turn_1", "turn_2"}, ShortlistCount: 2, ShortlistGroups: []string{"1", "2-5"}, Count: 4, Groups: []string{"turn/turn_1", "turn/turn_2", "shortlist/1", "shortlist/2-5"}}, InitialValidationDetails: validationSnapshot{Details: initialGroups}, BestValidationDetails: validationSnapshot{Details: bestGroups}, BestValidationStep: updates, DataOverlapAudit: dataOverlapAudit{TrainingRecords: 100, TrainingUniqueStates: 90, ValidationRecords: 50, ValidationUniqueStates: 45, OverlappingUniqueStates: 5}, Warnings: []string{"5 of 45 unique validation model states also occur in training; their teacher top-1 labels agree. This is state-distribution overlap, not solution-ID split overlap."}, Evaluations: map[string]json.RawMessage{}}
+	result := runResult{Stage: stage, GlobalUpdate: updates, Passed: true, InitialValidation: metrics{Loss: 8, Top1: .1, Top5: .2, Top16: .3}, FinalValidation: metrics{Loss: 4, Top1: .4, Top5: .5, Top16: .6}, BestValidation: metrics{Loss: 4, Top1: .4, Top5: .5, Top16: .6}, InitialTraining: metrics{Loss: 4, Top1: .1, Top5: .2, Top16: .3}, FinalTraining: metrics{Loss: 1, Top1: .9, Top5: .95, Top16: .99}, ValidationImprovements: 2, MajorGroupLearning: majorGroupLearning{MinimumExamples: 25, TurnCount: 2, TurnGroups: []string{"turn_2", "turn_3"}, ShortlistCount: 2, ShortlistGroups: []string{"1", "2-5"}, Count: 4, Groups: []string{"turn/turn_2", "turn/turn_3", "shortlist/1", "shortlist/2-5"}}, InitialValidationDetails: validationSnapshot{Details: initialGroups}, BestValidationDetails: validationSnapshot{Details: bestGroups}, BestValidationStep: updates, DataOverlapAudit: dataOverlapAudit{TrainingRecords: 100, TrainingUniqueStates: 90, ValidationRecords: 50, ValidationUniqueStates: 45, OverlappingUniqueStates: 5}, Warnings: []string{"5 of 45 unique validation model states also occur in training; their teacher top-1 labels agree. This is state-distribution overlap, not solution-ID split overlap."}, Evaluations: map[string]json.RawMessage{}}
 	if stage == "overfit" {
 		result.OverfitProof = &overfitProof{
 			InitialFixedBatch:               metrics{Loss: 10, Top1: .1, Top5: .2, Top16: .3},

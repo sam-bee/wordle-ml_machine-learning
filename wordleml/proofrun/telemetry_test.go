@@ -1,9 +1,11 @@
 package proofrun
 
 import (
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -130,5 +132,110 @@ func TestMajorGroupLearningReportsOnlyNonEmptyImprovedGroups(t *testing.T) {
 	got := majorGroupLearning(initial, best)
 	if got.MinimumExamples != 25 || got.TurnCount != 1 || got.ShortlistCount != 1 || got.Count != 2 || strings.Join(got.Groups, ",") != "turn/turn_1,shortlist/1" {
 		t.Fatalf("major group learning = %+v", got)
+	}
+}
+
+func TestValidationSnapshotEvidenceRejectsMissingOrInconsistentGroups(t *testing.T) {
+	turns := make([]proofmetrics.GroupResult, 6)
+	for index := range turns {
+		examples := 100
+		if index == 0 {
+			examples = 0
+		}
+		turns[index] = proofmetrics.GroupResult{Name: fmt.Sprintf("turn_%d", index+1), Examples: examples, EntropyExamples: examples, Loss: 2}
+	}
+	shortlists := []proofmetrics.GroupResult{
+		{Name: "1", Examples: 100, EntropyExamples: 100, Loss: 1},
+		{Name: "2-5", Examples: 100, EntropyExamples: 100, Loss: 2},
+		{Name: "6-20", Examples: 100, EntropyExamples: 100, Loss: 3},
+		{Name: "21-100", Examples: 100, EntropyExamples: 100, Loss: 4},
+		{Name: ">100", Examples: 100, EntropyExamples: 100, Loss: 5},
+	}
+	snapshot := ValidationSnapshot{
+		Metrics: Metrics{Loss: 3, Top1: .1, Top5: .2, Top16: .3},
+		Details: proofmetrics.Result{
+			Examples:          500,
+			Loss:              3,
+			Top1Accuracy:      .1,
+			Top5Accuracy:      .2,
+			Top16Accuracy:     .3,
+			EntropyExamples:   500,
+			ByTurn:            turns,
+			ByShortlistBucket: shortlists,
+			Opening:           proofmetrics.OpeningResult{Present: true, TeacherRank: 2311, HighestGuess: 1},
+		},
+	}
+	if err := validateValidationSnapshotEvidence(snapshot, 500); err != nil {
+		t.Fatalf("valid evidence: %v", err)
+	}
+
+	for name, mutate := range map[string]func(*ValidationSnapshot){
+		"empty details":   func(candidate *ValidationSnapshot) { candidate.Details = proofmetrics.Result{} },
+		"metric mismatch": func(candidate *ValidationSnapshot) { candidate.Metrics.Loss++ },
+		"missing turn":    func(candidate *ValidationSnapshot) { candidate.Details.ByTurn = candidate.Details.ByTurn[:5] },
+		"turn total":      func(candidate *ValidationSnapshot) { candidate.Details.ByTurn[1].Examples++ },
+		"wrong shortlist": func(candidate *ValidationSnapshot) { candidate.Details.ByShortlistBucket[0].Name = "wrong" },
+		"missing opening": func(candidate *ValidationSnapshot) { candidate.Details.Opening.Present = false },
+	} {
+		t.Run(name, func(t *testing.T) {
+			candidate := snapshot
+			candidate.Details.ByTurn = slices.Clone(snapshot.Details.ByTurn)
+			candidate.Details.ByShortlistBucket = slices.Clone(snapshot.Details.ByShortlistBucket)
+			mutate(&candidate)
+			if err := validateValidationSnapshotEvidence(candidate, 500); err == nil {
+				t.Fatal("invalid evidence was accepted")
+			}
+		})
+	}
+}
+
+func TestPriorValidationEvidenceChecksAllSummariesAndHistory(t *testing.T) {
+	snapshot := validValidationSnapshotForTest()
+	initial := snapshot
+	initial.Update = 0
+	final := snapshot
+	final.Update = 1000
+	best := snapshot
+	best.Update = 900
+	result := Result{
+		GlobalUpdate:             1000,
+		InitialValidation:        initial.Metrics,
+		FinalValidation:          final.Metrics,
+		BestValidation:           best.Metrics,
+		BestValidationStep:       900,
+		InitialValidationDetails: initial,
+		FinalValidationDetails:   final,
+		BestValidationDetails:    best,
+		ValidationSnapshots:      []ValidationSnapshot{initial, best, final},
+	}
+	if err := validatePriorValidationEvidence(result, 500); err != nil {
+		t.Fatalf("valid prior evidence: %v", err)
+	}
+	result.ValidationSnapshots[1].Details.ByShortlistBucket = nil
+	if err := validatePriorValidationEvidence(result, 500); err == nil || !strings.Contains(err.Error(), "history snapshot 1") {
+		t.Fatalf("malformed history error = %v", err)
+	}
+}
+
+func validValidationSnapshotForTest() ValidationSnapshot {
+	turns := make([]proofmetrics.GroupResult, 6)
+	for index := range turns {
+		examples := 100
+		if index == 0 {
+			examples = 0
+		}
+		turns[index] = proofmetrics.GroupResult{Name: fmt.Sprintf("turn_%d", index+1), Examples: examples, EntropyExamples: examples, Loss: 2}
+	}
+	shortlists := make([]proofmetrics.GroupResult, 5)
+	for index, name := range []string{"1", "2-5", "6-20", "21-100", ">100"} {
+		shortlists[index] = proofmetrics.GroupResult{Name: name, Examples: 100, EntropyExamples: 100, Loss: float64(index + 1)}
+	}
+	return ValidationSnapshot{
+		Metrics: Metrics{Loss: 3, Top1: .1, Top5: .2, Top16: .3},
+		Details: proofmetrics.Result{
+			Examples: 500, Loss: 3, Top1Accuracy: .1, Top5Accuracy: .2, Top16Accuracy: .3, EntropyExamples: 500,
+			ByTurn: turns, ByShortlistBucket: shortlists,
+			Opening: proofmetrics.OpeningResult{Present: true, TeacherRank: 2311, HighestGuess: 1},
+		},
 	}
 }
