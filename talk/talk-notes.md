@@ -36,8 +36,8 @@ gradually and keep the Wordle problem visible throughout, rather than turning in
   every possible solution as an action.
 - Split by solution, not by generated game state: 2,109 answers for training, 100 for validation while tuning, and 100
   held back for one final test. This prevents states for the same answer leaking across datasets.
-- Make the split deterministic and keep the full 2,309-word backup. Repeatedly consulting the final test set—or trying
-  new splits after seeing scores—turns human judgement into another way of overfitting.
+- Keep the full 2,309-word backup alongside the fixed split. Repeatedly consulting the final test set turns human
+  judgement into another way of overfitting.
 
 ## Later structure
 

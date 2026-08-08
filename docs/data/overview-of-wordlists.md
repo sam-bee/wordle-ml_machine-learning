@@ -17,24 +17,6 @@ The action space is the union of all 2,309 solutions and 2,430 additional words 
 from a 51-million-word corpus of American film subtitles, so the selection favours words found in spoken dialogue and
 inherits that corpus's biases. The exact historic frequency cutoff is not recorded in the wordlists repository.
 
-## Solution split
-
-Solutions are partitioned before synthetic game states are generated. This keeps every state for a particular answer in
-one split and prevents answer-level leakage between training and evaluation data.
-
-Run `make data-split` to recreate the split in the development container. `cmd/split-solutions`:
-
-1. validates the complete, sorted solution backup;
-2. ranks each word by the SHA-256 digest of `wordle-ml-solution-split-v1`, a newline, and the word;
-3. assigns the first 100 ranked words to the final test set, the next 100 to validation, and the remaining 2,109 to training;
-4. sorts each output alphabetically without changing its membership.
-
-The validation set is the set to inspect repeatedly while tuning the model. The test set is the final holdout and should
-be evaluated only after the model and evaluation procedure are frozen. Because its file is version-controlled, this is
-a procedural rather than secret holdout; a genuinely blind external benchmark would need to be held outside the
-repository by another person or system. Do not change the seed or regenerate a more favourable split after viewing
-metrics.
-
 ## Provenance
 
 The all-solutions backup and action space are exact copies from the neighbouring `../wordle-ml_wordlists/` repository at

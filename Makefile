@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help configure docker-build build test tidy format data-split gpu-check smoke shell \
+.PHONY: help configure docker-build build test tidy format gpu-check smoke shell \
 	monitoring web web-logs tensorboard tensorboard-logs logs down
 
 CUDA_FLAGS := -std=c++17 -arch=sm_120 -Xcompiler=-Wall,-Wextra
@@ -12,7 +12,6 @@ help:
 	@echo "  make docker-build  Build the GoMLX/CUDA and web images"
 	@echo "  make build         Compile both Go modules"
 	@echo "  make test          Run both Go test suites"
-	@echo "  make data-split    Recreate train/validation/test solution lists"
 	@echo "  make smoke         Verify the 5070 Ti, sm_120 CUDA, and GoMLX/XLA"
 	@echo "  make monitoring    Start the splash page and TensorBoard"
 	@echo "  make shell         Open a shell in the GoMLX/CUDA container"
@@ -38,9 +37,6 @@ tidy: docker-build
 format: docker-build
 	docker compose run --rm --no-deps wordleml bash -lc \
 		'go fmt ./... && cd /workspace/web && go fmt ./...'
-
-data-split: docker-build
-	docker compose run --rm --no-deps wordleml go run ./cmd/split-solutions
 
 gpu-check: docker-build
 	docker compose run --rm --no-deps wordleml bash -lc \
