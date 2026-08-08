@@ -2,3 +2,5 @@
 /wordleml/smoke
 /wordleml/inspect
 /wordleml/train
+/wordleml/evaluate
+/wordleml/report

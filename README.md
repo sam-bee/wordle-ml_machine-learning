@@ -1,9 +1,9 @@
 # Wordle ML
 
-Wordle ML is a Go and CUDA project preparing a GoMLX policy to play Wordle. It now contains the frozen imitation
-corpus, shared state encoder and batcher, and the initial supervised-training plumbing, alongside the model,
-reproducible development stack, GPU smoke test, TensorBoard, and placeholder web visualiser. No training experiment or
-result has been run yet; gameplay is still future work.
+Wordle ML is a Go and CUDA project preparing a GoMLX policy to play Wordle. It contains the frozen imitation corpus,
+shared state encoder and batcher, fixed supervised-training proof stages, independently reloadable checkpoint
+evaluation, a reproducible development stack, GPU smoke test, TensorBoard, and a placeholder web visualiser. The proof
+workflow is implemented, but no successful proof-run result is claimed yet.
 
 ## Quick start
 
@@ -14,15 +14,17 @@ make smoke
 make monitoring
 ```
 
-The smoke test passes only the configured RTX 5070 Ti into the container, compiles a CUDA kernel for `sm_120`, runs it,
-and executes a small GoMLX graph using the `xla:cuda` backend.
+The smoke test passes exactly one configured, approved GPU into the container: an RTX 5070 Ti or RTX 5050 (including
+the RTX 5050 Laptop GPU name). It rejects every other visible device, including an RTX 3060, requires compute
+capability 12.0, compiles a CUDA kernel for `sm_120`, and executes a small GoMLX graph using `xla:cuda`.
 
 Once monitoring is running, open:
 
 - splash page: <http://127.0.0.1:8082>
 - TensorBoard: <http://127.0.0.1:6007>
 
-The training command writes scalar events here when a run is started. See
+Proof runs write scalar and histogram events under `runs/<run-id>/events`, which TensorBoard discovers beneath
+`runs/`. See
 [`docs/development.md`](docs/development.md) for the container layout, GPU selection, and other commands.
 
 The training, validation, and final-test solution splits and proposed model-action vocabulary live in [`data/`](data/).
@@ -38,12 +40,41 @@ one opening record), 1,600 mini records, and 2,500 records in each validation an
 held back and untouched. The data contract and first supervised-run plumbing are described in
 [`docs/ml/supervised-training.md`](docs/ml/supervised-training.md).
 
-The training command is safe to inspect before the first experiment: with its
-default `-steps=0`, it only prints the resolved configuration.
+Run one fixed proof stage with a stable run ID. The run records its immutable configuration and provenance, checkpoints,
+metrics, log, and TensorBoard events under `runs/<run-id>/`.
 
 ```console
-docker compose run --rm --no-deps wordleml go run ./cmd/train
+docker compose run --rm --no-deps wordleml go run ./cmd/train -run-id=overfit-001 -stage=overfit
 ```
 
-The first bounded experiment is the next task; see
-[`docs/project-plan/next-steps.md`](docs/project-plan/next-steps.md).
+The fixed stages must run in proof order. The runner owns the overfit run-zero
+baseline: it independently reloads the initial checkpoint and records its first
+10 validation games, so `cmd/evaluate` deliberately cannot rerun
+`overfit initial games10`. A **fresh** mini run must stop at update 500, then
+the same run ID resumes without `-stop-at`:
+
+```console
+docker compose run --rm --no-deps wordleml go run ./cmd/train -run-id=mini-001 -stage=mini -stop-at=500
+docker compose run --rm --no-deps wordleml go run ./cmd/train -run-id=mini-001 -stage=mini
+docker compose run --rm --no-deps wordleml go run ./cmd/evaluate -run-id=mini-001 -checkpoint=latest -mode=games10
+```
+
+After mini evaluation has passed, run the full stage and create its
+validation-only artifacts in order:
+
+```console
+docker compose run --rm --no-deps wordleml go run ./cmd/train -run-id=full-001 -stage=full
+docker compose run --rm --no-deps wordleml go run ./cmd/evaluate -run-id=full-001 -checkpoint=initial -mode=games100
+docker compose run --rm --no-deps wordleml go run ./cmd/evaluate -run-id=full-001 -checkpoint=best -mode=games100
+docker compose run --rm --no-deps wordleml go run ./cmd/evaluate -run-id=full-001 -checkpoint=best -mode=ablations
+docker compose run --rm --no-deps wordleml go run ./cmd/report -overfit-run-id=overfit-001 -mini-run-id=mini-001 -full-run-id=full-001 -output=../docs/ml/initial-training-proof-report.md
+```
+
+`cmd/report` consumes the three run IDs, verifies its four rendered rows
+(run-zero baseline, overfit, mini, and full), re-verifies TensorBoard event
+files for every proof stage and their game-summary tags, and atomically writes
+the report. A failed gate returns non-zero and writes a visibly incomplete
+report with the stopping reason, without replacing an existing successful
+report.
+The final-test split remains sealed: neither training nor evaluation offers a
+test-split mode.
