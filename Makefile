@@ -24,7 +24,7 @@ docker-build: .env
 
 build: docker-build
 	docker compose run --rm --no-deps wordleml bash -lc \
-		'go build -o /tmp/wordleml-smoke ./cmd/smoke && cd /workspace/web && go build -o /tmp/wordleml-web ./cmd/server'
+		'go build -o /tmp/wordleml-smoke ./cmd/smoke && go build -o /tmp/wordleml-inspect ./cmd/inspect && cd /workspace/web && go build -o /tmp/wordleml-web ./cmd/server'
 
 test: docker-build
 	docker compose run --rm --no-deps wordleml bash -lc \

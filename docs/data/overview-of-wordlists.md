@@ -25,3 +25,14 @@ curating the vocabularies; copies and derived splits here make model training an
 
 The larger valid-guesses list is deliberately not copied. It describes everything accepted by the game, whereas the
 model's output indices are defined by the smaller proposed action space.
+
+## Frozen imitation records
+
+[`data/imitation/`](../../data/imitation/) contains the eight definitive WDIT v3
+artifacts: paired `.bin` and `.json` files for mini, train, validation, and the
+final test split. They are copied verbatim from the synthetic-data release;
+they are inputs, not files this repository regenerates. `wordleml/imitationdata`
+requires both files, checks the binary header and every vocabulary/split hash
+against these word lists, and verifies the sidecar basename, dimensions,
+membership IDs, and opening-record declaration. Default inspection and tests
+use mini; they deliberately do not open final-test records.
