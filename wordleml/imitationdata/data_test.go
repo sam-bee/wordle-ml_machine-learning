@@ -14,6 +14,7 @@ import (
 	"github.com/sam-bee/wordle-ml_machine-learning/modelstate"
 	"github.com/sam-bee/wordle-ml_machine-learning/policy"
 	"github.com/sam-bee/wordle-ml_machine-learning/vocabulary"
+	synthetic "github.com/sam-bee/wordle-ml_synthetic-data-creation/dataset"
 )
 
 func TestLoadMiniMetadataContract(t *testing.T) {
@@ -50,6 +51,14 @@ func TestExampleSeparatesAvailabilityFromCandidateBonusAndUsesTeacherLabel(t *te
 	}
 	if example.TeacherTopAction != int32(example.Record.TopKActionIDs[0]) {
 		t.Fatalf("teacher label=%d, want top action=%d", example.TeacherTopAction, example.Record.TopKActionIDs[0])
+	}
+	if example.RecordIndex < 0 {
+		t.Fatalf("record index=%d, want non-negative", example.RecordIndex)
+	}
+	for rank, actionID := range example.Record.TopKActionIDs {
+		if got := example.TeacherTopActions[rank]; got != int32(actionID) {
+			t.Fatalf("teacher rank %d=%d, want %d", rank+1, got, actionID)
+		}
 	}
 	for i := 0; i < int(example.Record.TurnDepth); i++ {
 		if got := example.AvailableActionMask[example.Record.History[i].GuessID]; got != 0 {
@@ -121,8 +130,11 @@ func TestUnbatchedDatasetShapesAndDTypes(t *testing.T) {
 				t.Fatalf("input %d: %v", i, err)
 			}
 		}
+		if len(batch.Labels) != 1 {
+			t.Fatalf("labels=%d, want top-1", len(batch.Labels))
+		}
 		if err := batch.Labels[0].Shape().Check(dtypes.Int32, 1); err != nil {
-			t.Fatalf("label: %v", err)
+			t.Fatalf("top-1 label: %v", err)
 		}
 		return
 	}
@@ -166,11 +178,131 @@ func TestBatchedMiniShapesDTypesAndFiniteValues(t *testing.T) {
 			}
 		}
 		if err := batch.Labels[0].Shape().Check(dtypes.Int32, 3, 1); err != nil {
-			t.Fatalf("label: %v", err)
+			t.Fatalf("top-1 label: %v", err)
 		}
 		return
 	}
 	t.Fatal("batched dataset produced no batch")
+}
+
+func TestTrainingSamplerInjectsOpeningAndResumesExactly(t *testing.T) {
+	training := loadTrain(t)
+	opening, found, err := training.FindOpening()
+	if err != nil {
+		t.Fatalf("FindOpening(train): %v", err)
+	}
+	if !found || opening.Record.SolutionID != synthetic.OpeningSolutionID || opening.Record.TurnDepth != 0 {
+		t.Fatalf("opening = %+v, found=%t", opening.Record, found)
+	}
+	mini := loadMini(t)
+	if _, found, err := mini.FindOpening(); err != nil || found {
+		t.Fatalf("FindOpening(mini) found=%t err=%v, want no opening", found, err)
+	}
+	validationSource := *mini
+	validationSource.split = Validation
+	if _, err := NewTrainingSampler(&validationSource, opening, 128, 71, Cursor{}); err == nil {
+		t.Fatal("NewTrainingSampler accepted validation data")
+	}
+
+	const batchSize = 129
+	sampler, err := NewTrainingSampler(mini, opening, batchSize, 71, Cursor{})
+	if err != nil {
+		t.Fatalf("NewTrainingSampler: %v", err)
+	}
+	seenFirstEpoch := make([]bool, mini.Len())
+	seenCount := 0
+	for batchNumber := 0; batchNumber < 13; batchNumber++ {
+		examples, err := sampler.Next()
+		if err != nil {
+			t.Fatalf("Next batch %d: %v", batchNumber, err)
+		}
+		if len(examples) != batchSize || examples[0].Record.SolutionID != synthetic.OpeningSolutionID {
+			t.Fatalf("batch %d did not reserve its first slot for opening", batchNumber)
+		}
+		for index, example := range examples[1:] {
+			if example.Record.SolutionID == synthetic.OpeningSolutionID {
+				t.Fatalf("batch %d source slot %d duplicated opening", batchNumber, index+1)
+			}
+			if seenCount >= mini.Len() {
+				continue
+			}
+			if seenFirstEpoch[example.RecordIndex] {
+				t.Fatalf("source record %d repeated before epoch was exhausted", example.RecordIndex)
+			}
+			seenFirstEpoch[example.RecordIndex] = true
+			seenCount++
+		}
+	}
+	if seenCount != mini.Len() {
+		t.Fatalf("first epoch yielded %d unique records, want %d", seenCount, mini.Len())
+	}
+
+	saved := sampler.Cursor()
+	wantNext := sampler.Peek()
+	restored, err := NewTrainingSampler(mini, opening, batchSize, 71, saved)
+	if err != nil {
+		t.Fatalf("restore sampler: %v", err)
+	}
+	if got := restored.Peek(); !reflect.DeepEqual(got, wantNext) {
+		t.Fatalf("restored next IDs=%v, want %v", got, wantNext)
+	}
+	wantBatch, err := sampler.Next()
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotBatch, err := restored.Next()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := range wantBatch {
+		if gotBatch[index].RecordIndex != wantBatch[index].RecordIndex ||
+			gotBatch[index].Record.SolutionID != wantBatch[index].Record.SolutionID {
+			t.Fatalf("restored batch record %d=(%d,%d), want (%d,%d)", index,
+				gotBatch[index].RecordIndex, gotBatch[index].Record.SolutionID,
+				wantBatch[index].RecordIndex, wantBatch[index].Record.SolutionID)
+		}
+	}
+}
+
+func TestMaterializeBatchCopiesFixedInputsAndTeacherRanking(t *testing.T) {
+	mini := loadMini(t)
+	examples := make([]Example, 3)
+	for index := range examples {
+		var err error
+		examples[index], err = mini.Example(index)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	batch, err := MaterializeBatch(examples)
+	if err != nil {
+		t.Fatalf("MaterializeBatch: %v", err)
+	}
+	defer batch.Finalize()
+	if err := batch.Inputs[0].Shape().Check(dtypes.Float32, 3, vocabulary.NumSolutions); err != nil {
+		t.Fatal(err)
+	}
+	if err := batch.Inputs[4].Shape().Check(dtypes.Float32, 3, vocabulary.NumActions); err != nil {
+		t.Fatal(err)
+	}
+	if err := batch.Labels[0].Shape().Check(dtypes.Int32, 3, 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := batch.Labels[1].Shape().Check(dtypes.Int32, 3, 16); err != nil {
+		t.Fatal(err)
+	}
+	top16 := batch.Labels[1].Value().([][]int32)
+	for row := range examples {
+		if !reflect.DeepEqual(top16[row], examples[row].TeacherTopActions[:]) {
+			t.Fatalf("teacher row %d=%v, want %v", row, top16[row], examples[row].TeacherTopActions)
+		}
+	}
+	// The batch must not alias Example storage because Trainer may donate it.
+	before := batch.Inputs[0].Value().([][]float32)[0][0]
+	examples[0].CandidateMask[0] = before + 10
+	if got := batch.Inputs[0].Value().([][]float32)[0][0]; got != before {
+		t.Fatalf("materialized candidate mask aliased source: got %v, want %v", got, before)
+	}
 }
 
 func TestRejectsMismatchedMetadataHashAndSplit(t *testing.T) {
@@ -222,6 +354,15 @@ func TestModelStateAndPolicyAgreeOn209CandidateStatistics(t *testing.T) {
 func loadMini(t *testing.T) *Data {
 	t.Helper()
 	data, err := Load(loadVocabulary(t), filepath.Join(repositoryRoot(t), "data", "imitation"), Mini)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
+
+func loadTrain(t *testing.T) *Data {
+	t.Helper()
+	data, err := Load(loadVocabulary(t), filepath.Join(repositoryRoot(t), "data", "imitation"), Train)
 	if err != nil {
 		t.Fatal(err)
 	}
