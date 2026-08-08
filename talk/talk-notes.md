@@ -89,19 +89,21 @@ gradually and keep the Wordle problem visible throughout, rather than turning in
   checkpoint/validation cadence are recorded in each run rather than chosen on
   stage.
 - Explain initial/latest/best checkpoints, continuous TensorBoard events, and
-  per-run provenance as repeatability tools, not evidence of a result. A fresh
-  mini run must stop at 500 and resume without its stop flag. The runner owns
-  the overfit run-zero game baseline, rather than asking evaluation to rerun
-  it.
+  per-run provenance as the evidence behind the completed
+  [initial proof report](../docs/ml/initial-training-proof-report.md). The mini
+  run passed its required stop at 500 and resume; the runner owns the overfit
+  run-zero game baseline, rather than asking evaluation to rerun it.
 - After full passes, show the fair same-population comparison: initial 100
   validation games, best 100 validation games, then best-checkpoint ablations.
   The report command consumes the three proof run IDs, verifies four rendered
   rows, re-verifies every stage's TensorBoard event files and game-summary tags,
   and writes the checked-in Markdown report without rerunning training or
   evaluation.
-- The implementation supports these proof gates, but the talk must not claim a
-  proof passed until a completed run artifact demonstrates it. Validation guides
-  choices; final test stays sealed.
+- The completed fixed validation proof reduced loss from 8.3005 to 3.1633 and
+  increased top-1 from 0.0056 to 0.5008. Its best checkpoint solved 97/100 of
+  the fixed validation games versus 4/100 at initialization, reducing mean
+  guesses from 5.86 to 3.65. Present this as a bounded proof result, not a
+  generalization claim: validation guides choices and final test stays sealed.
 
 ## Later structure
 

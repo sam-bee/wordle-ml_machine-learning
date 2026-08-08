@@ -9,7 +9,9 @@ Current project documentation:
 - [`ml/model-structure.md`](ml/model-structure.md) describes the GoMLX policy architecture and parameter count.
 - [`ml/board-state-encoding.md`](ml/board-state-encoding.md) describes the four precomputed tensors consumed by the model.
 - [`ml/supervised-training.md`](ml/supervised-training.md) describes the frozen teacher corpus, loss, metrics, and
-  implemented, pre-run supervised-training proof workflow.
-- [`project-plan/next-steps.md`](project-plan/next-steps.md) records the remaining work to execute the first
-  training experiment; [`project-plan/codex-initial-training-proof-plan.md`](project-plan/codex-initial-training-proof-plan.md)
-  records its implementation requirements and proof gates.
+  completed initial supervised-training proof, with a link to its report.
+- [`ml/initial-training-proof-report.md`](ml/initial-training-proof-report.md) is the generated evidence from the
+  completed fixed validation proof.
+- [`project-plan/next-steps.md`](project-plan/next-steps.md) records the post-proof review boundary;
+  [`project-plan/codex-initial-training-proof-plan.md`](project-plan/codex-initial-training-proof-plan.md) records
+  the implementation requirements and proof gates used for that run.

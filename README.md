@@ -3,7 +3,16 @@
 Wordle ML is a Go and CUDA project preparing a GoMLX policy to play Wordle. It contains the frozen imitation corpus,
 shared state encoder and batcher, fixed supervised-training proof stages, independently reloadable checkpoint
 evaluation, a reproducible development stack, GPU smoke test, TensorBoard, and a placeholder web visualiser. The proof
-workflow is implemented, but no successful proof-run result is claimed yet.
+workflow completed its first fixed validation proof; see the
+[initial training proof report](docs/ml/initial-training-proof-report.md).
+
+The best full checkpoint reduced validation loss from 8.3005 to 3.1633 and
+raised top-1 agreement from 0.0056 to 0.5008. On the fixed 100-game validation
+population it solved 97/100 games versus 4/100 at initialization, reducing mean
+guesses from 5.86 to 3.65; the mini stop/resume proof also passed. These are
+proof-run results, not a claim of broader generalization: the final-test split
+remains sealed and the recorded state-distribution overlap is documented in the
+report.
 
 ## Quick start
 
@@ -40,8 +49,9 @@ one opening record), 1,600 mini records, and 2,500 records in each validation an
 held back and untouched. The data contract and first supervised-run plumbing are described in
 [`docs/ml/supervised-training.md`](docs/ml/supervised-training.md).
 
-Run one fixed proof stage with a stable run ID. The run records its immutable configuration and provenance, checkpoints,
-metrics, log, and TensorBoard events under `runs/<run-id>/`.
+Run one fixed proof stage with a stable, unused run ID. The run records its
+immutable configuration and provenance, checkpoints, metrics, log, and
+TensorBoard events under `runs/<run-id>/`.
 
 ```console
 docker compose run --rm --no-deps wordleml go run ./cmd/train -run-id=overfit-001 -stage=overfit

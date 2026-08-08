@@ -47,7 +47,7 @@ The runner owns the overfit run-zero baseline: it independently reloads the
 initial checkpoint and records its first 10 validation games in the overfit run
 artifacts. `cmd/evaluate` therefore rejects an attempt to rerun
 `overfit initial games10`. After mini passes, evaluate `mini latest games10`.
-The complete required operator sequence is:
+For a new proof, use fresh matching run IDs and this operator sequence:
 
 ```console
 docker compose run --rm --no-deps wordleml go run ./cmd/train -run-id=overfit-001 -stage=overfit
@@ -72,9 +72,18 @@ still produces a clearly marked incomplete report naming the stopped stage and
 reason while the command returns an error; it does not overwrite an existing
 successful report.
 
+## Completed initial proof
+
+The generated [initial training proof report](initial-training-proof-report.md)
+records a passed mini stop/resume gate and a passed full proof. The best full
+checkpoint reduced validation loss from 8.3005 to 3.1633 and raised validation
+top-1 from 0.0056 to 0.5008. On the same fixed 100-game validation population,
+it solved 97/100 games versus 4/100 for initialization, with mean guesses 3.65
+versus 5.86. This is evidence for the bounded proof workflow only, not a claim
+of generalization; the final-test split remains sealed.
+
 The exact train/validation state-overlap audit is retained in every run: 190
 of 2,445 unique validation encoded states also occur in training, and their
 teacher top-1 labels agree. This is state-distribution overlap, not
 solution-split leakage—the frozen solution IDs remain disjoint. No command
-exposes the final-test split. The workflow and its gates are implemented, but
-no successful proof-run result is claimed here.
+exposes the final-test split.

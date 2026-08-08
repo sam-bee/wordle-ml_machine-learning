@@ -65,7 +65,13 @@ inspect a mini record without running the proof sequence:
 docker compose run --rm --no-deps wordleml go run ./cmd/inspect
 ```
 
-The required operator sequence is:
+The [completed initial proof](ml/initial-training-proof-report.md) passed its
+mini resume gate and, on the fixed validation population, reduced full-run
+validation loss from 8.3005 to 3.1633, raised top-1 from 0.0056 to 0.5008, and
+improved games from 4/100 at initialization to 97/100 at best (mean guesses
+5.86 to 3.65). This is not a final-test or generalization claim.
+
+For a new proof, use fresh matching run IDs and this operator sequence:
 
 ```console
 docker compose run --rm --no-deps wordleml go run ./cmd/train -run-id=overfit-001 -stage=overfit
