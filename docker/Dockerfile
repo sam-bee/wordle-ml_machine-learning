@@ -1,10 +1,12 @@
-# GoMLX development/runtime image with CUDA support for compute capability 12.0.
+# GoMLX development image with CUDA support for compute capability 12.0 only.
 FROM nvidia/cuda:13.1.0-devel-ubuntu22.04
 
 ARG DOCKERCOMPOSE_UID=1000
 ARG DOCKERCOMPOSE_GID=1000
 ARG GO_VERSION=1.26.5
-ARG PJRT_INSTALLER_VERSION=v0.2.2
+ARG GO_SHA256=5c2c3b16caefa1d968a94c1daca04a7ca301a496d9b086e17ad77bb81393f053
+ARG PJRT_INSTALLER_VERSION=v0.4.0
+ARG PJRT_CUDA_VERSION=0.11.0
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -15,33 +17,36 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         git \
     && rm -rf /var/lib/apt/lists/*
 
-RUN curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" \
-    | tar -xz -C /usr/local
+RUN curl -fsSLo /tmp/go.tar.gz "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" \
+    && echo "${GO_SHA256}  /tmp/go.tar.gz" | sha256sum --check --strict \
+    && tar -xzf /tmp/go.tar.gz -C /usr/local \
+    && rm /tmp/go.tar.gz
 
 ENV PATH=/usr/local/go/bin:${PATH}
 
-RUN groupadd -g "${DOCKERCOMPOSE_GID}" squarl \
-    && useradd -m -u "${DOCKERCOMPOSE_UID}" -g "${DOCKERCOMPOSE_GID}" -s /bin/bash squarl
+RUN groupadd --gid "${DOCKERCOMPOSE_GID}" wordleml \
+    && useradd --create-home --uid "${DOCKERCOMPOSE_UID}" --gid "${DOCKERCOMPOSE_GID}" \
+        --shell /bin/bash wordleml
 
-ENV HOME=/home/squarl
-ENV PATH=/home/squarl/go/bin:${PATH}
+ENV HOME=/home/wordleml
+ENV PATH=/home/wordleml/go/bin:${PATH}
 
-USER squarl
-WORKDIR /workspace/squarl
+USER wordleml
+WORKDIR /workspace/wordleml
 
-# Production containers should carry their PJRT plugin instead of downloading it at startup.
+# Install the CUDA 13 PJRT plugin at image-build time. Runtime downloads are
+# disabled below, which keeps smoke tests and eventual training reproducible.
 RUN go run "github.com/gomlx/go-xla/cmd/pjrt_installer@${PJRT_INSTALLER_VERSION}" \
         -plugin cuda13 \
-        -version latest \
-        -path /home/squarl/.local/lib/go-xla
+        -version "${PJRT_CUDA_VERSION}" \
+        -path /home/wordleml/.local/lib/go-xla \
+        -verbosity 1
 
-COPY --chown=squarl:squarl squarl/go.mod squarl/go.sum* ./
+COPY --chown=wordleml:wordleml wordleml/go.mod wordleml/go.sum* ./
 RUN go mod download
 
 ENV GOMLX_BACKEND=xla:cuda
 ENV GOMLX_NO_AUTO_INSTALL=1
-# The supported GeForce GPUs use CUDA minor-version compatibility, not the
-# forward-compatibility libcuda bundled in the CUDA image.
-ENV LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH}
+ENV PJRT_PLUGIN_LIBRARY_PATH=/home/wordleml/.local/lib/go-xla/nvidia
 
-CMD ["go", "run", "./cmd/squarl"]
+CMD ["go", "run", "./cmd/smoke"]

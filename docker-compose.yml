@@ -1,26 +1,19 @@
+name: wordle-ml
+
 services:
   web:
-    image: squarl:web
+    image: wordle-ml:web
     build:
       context: .
       dockerfile: docker/Dockerfile.web
-    # Keep the visualizer local until it has an authentication model.
-    ports:
-      - "127.0.0.1:${WEB_HOST_PORT:-8081}:8080"
     environment:
       WEB_ADDR: ":8080"
-      WEB_INITIAL_ARRANGEMENT: "/data/best-ever.json"
-      WEB_EPISODE_DIRECTORY: "/data/episodes"
-    volumes:
-      - type: bind
-        source: ./data
-        target: /data
-        read_only: true
+    ports:
+      - "127.0.0.1:${WEB_HOST_PORT:-8082}:8080"
     restart: unless-stopped
 
   tensorboard:
     image: tensorflow/tensorflow:2.20.0
-    # TensorBoard has no authentication, so expose it only on loopback.
     entrypoint: ["tensorboard"]
     command:
       - "--logdir=/logs"
@@ -28,7 +21,7 @@ services:
       - "--port=6006"
       - "--reload_interval=2"
     ports:
-      - "127.0.0.1:${TENSORBOARD_HOST_PORT:-6006}:6006"
+      - "127.0.0.1:${TENSORBOARD_HOST_PORT:-6007}:6006"
     volumes:
       - type: bind
         source: ./data/tensorboard
@@ -36,35 +29,32 @@ services:
         read_only: true
     restart: unless-stopped
 
-  squarl:
-    image: squarl:cuda13.1
+  wordleml:
+    image: wordle-ml:cuda13.1
     build:
       context: .
       dockerfile: docker/Dockerfile
       args:
-        DOCKERCOMPOSE_UID: ${DOCKERCOMPOSE_UID}
-        DOCKERCOMPOSE_GID: ${DOCKERCOMPOSE_GID}
-    working_dir: /workspace/squarl
+        DOCKERCOMPOSE_UID: ${DOCKERCOMPOSE_UID:-1000}
+        DOCKERCOMPOSE_GID: ${DOCKERCOMPOSE_GID:-1000}
+    working_dir: /workspace/wordleml
     volumes:
       - type: bind
         source: .
         target: /workspace
-        read_only: false
     environment:
-      DOCKERCOMPOSE_UID: ${DOCKERCOMPOSE_UID}
-      DOCKERCOMPOSE_GID: ${DOCKERCOMPOSE_GID}
-      NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
-      CUDA_DEVICE_ORDER: ${CUDA_DEVICE_ORDER:-FASTEST_FIRST}
-      CUDA_VISIBLE_DEVICES: ${CUDA_VISIBLE_DEVICES:-0}
-      GOMLX_BACKEND: ${GOMLX_BACKEND:-xla:cuda}
+      GOMLX_BACKEND: xla:cuda
       GOMLX_NO_AUTO_INSTALL: "1"
-      SQUARL_DATA_DIR: ${SQUARL_DATA_DIR:-/workspace/data}
-      WEB_URL: ${WEB_URL:-http://web:8080}
-    gpus: all
-    depends_on:
-      - tensorboard
-      - web
+      WORDLEML_DATA_DIR: /workspace/data
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${NVIDIA_GPU_DEVICE_ID:?Set NVIDIA_GPU_DEVICE_ID in .env to the RTX 5070 Ti UUID}"]
+              capabilities: [gpu]
+    init: true
     stdin_open: true
     tty: true
-    command: ["go", "run", "./cmd/squarl"]
+    command: ["go", "run", "./cmd/smoke"]

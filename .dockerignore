@@ -1,0 +1,6 @@
+.git
+.codex
+.env
+build
+data
+**/node_modules
