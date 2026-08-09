@@ -113,6 +113,16 @@ func TestReadConfigRequiresExactFixedConfiguration(t *testing.T) {
 	if _, err := ReadConfig(layout); err == nil {
 		t.Fatal("ReadConfig accepted a modified production configuration")
 	}
+	replication, err := proofrun.ConfigFor(proofrun.SeedReplication)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := layout.WriteConfig(replication); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := ReadConfig(layout); err != nil || got != replication {
+		t.Fatalf("ReadConfig(seed replication) = %#v, %v; want %#v, nil", got, err, replication)
+	}
 }
 
 func TestAllowedStageCheckpointModeCombinations(t *testing.T) {
@@ -126,6 +136,7 @@ func TestAllowedStageCheckpointModeCombinations(t *testing.T) {
 		{proofrun.Full, Best, Games100},
 		{proofrun.Full, Best, Ablations},
 		{proofrun.Production, Best, Games100},
+		{proofrun.SeedReplication, Best, Games100},
 	}
 	for _, test := range allowed {
 		if err := validateCombination(test.stage, test.checkpoint, test.mode); err != nil {
@@ -147,6 +158,10 @@ func TestAllowedStageCheckpointModeCombinations(t *testing.T) {
 		{proofrun.Production, Latest, Games100},
 		{proofrun.Production, Best, Games10},
 		{proofrun.Production, Best, Ablations},
+		{proofrun.SeedReplication, Initial, Games100},
+		{proofrun.SeedReplication, Latest, Games100},
+		{proofrun.SeedReplication, Best, Games10},
+		{proofrun.SeedReplication, Best, Ablations},
 	} {
 		if err := validateCombination(test.stage, test.checkpoint, test.mode); err == nil {
 			t.Errorf("%+v unexpectedly allowed", test)
@@ -196,7 +211,7 @@ func TestPersistEvaluationAddsAndPreservesRawEntries(t *testing.T) {
 }
 
 func TestPersistEvaluationRequiresPassedCompletedTraining(t *testing.T) {
-	for _, stage := range []proofrun.Stage{proofrun.Mini, proofrun.Full, proofrun.Production} {
+	for _, stage := range []proofrun.Stage{proofrun.Mini, proofrun.Full, proofrun.Production, proofrun.SeedReplication} {
 		layout, err := runstate.Create(t.TempDir(), "proof-"+string(stage))
 		if err != nil {
 			t.Fatal(err)
@@ -211,7 +226,7 @@ func TestPersistEvaluationRequiresPassedCompletedTraining(t *testing.T) {
 }
 
 func TestEvaluationPreflightRejectsUnpassedTrainingWithoutArtifacts(t *testing.T) {
-	for _, stage := range []proofrun.Stage{proofrun.Mini, proofrun.Production} {
+	for _, stage := range []proofrun.Stage{proofrun.Mini, proofrun.Production, proofrun.SeedReplication} {
 		t.Run(string(stage), func(t *testing.T) {
 			layout, err := runstate.Create(t.TempDir(), "unpassed-"+string(stage))
 			if err != nil {
@@ -244,10 +259,12 @@ func TestCanonicalReportTrajectorySelection(t *testing.T) {
 		{proofrun.Mini, Latest, Games10, true},
 		{proofrun.Full, Best, Games100, true},
 		{proofrun.Production, Best, Games100, true},
+		{proofrun.SeedReplication, Best, Games100, true},
 		{proofrun.Overfit, Initial, Games10, false},
 		{proofrun.Full, Initial, Games100, false},
 		{proofrun.Full, Best, Ablations, false},
 		{proofrun.Production, Best, Ablations, false},
+		{proofrun.SeedReplication, Best, Ablations, false},
 	} {
 		if got := isCanonicalReportTrajectory(test.stage, test.checkpoint, test.mode); got != test.want {
 			t.Errorf("canonical(%s,%s,%s) = %t, want %t", test.stage, test.checkpoint, test.mode, got, test.want)

@@ -87,6 +87,7 @@ type Manifest struct {
 	Runtime             RuntimeMetadata `json:"runtime"`
 	Seed                int64           `json:"seed"`
 	EffectiveConfig     json.RawMessage `json:"effective_config"`
+	FinalTestSealed     bool            `json:"final_test_sealed_unopened,omitempty"`
 }
 
 // CollectOptions supplies the factual inputs used to build a manifest.
@@ -106,6 +107,9 @@ type CollectOptions struct {
 	TrainingSplit   []string
 	ValidationSplit []string
 	TestSplit       []string
+	// FinalTestSealed forbids TestSplit paths and records that collection did
+	// not open or hash the final-test word list.
+	FinalTestSealed bool
 
 	ModelParameterCount int64
 	Runtime             RuntimeMetadata
@@ -141,9 +145,16 @@ func Collect(options CollectOptions) (Manifest, error) {
 	if err != nil {
 		return Manifest{}, err
 	}
-	test, err := collectArtifacts(root, options.TestSplit, "test split")
-	if err != nil {
-		return Manifest{}, err
+	var test []Artifact
+	if options.FinalTestSealed {
+		if len(options.TestSplit) != 0 {
+			return Manifest{}, errors.New("sealed final test must not provide test-split paths")
+		}
+	} else {
+		test, err = collectArtifacts(root, options.TestSplit, "test split")
+		if err != nil {
+			return Manifest{}, err
+		}
 	}
 
 	collectedAt := options.CollectedAt
@@ -169,6 +180,7 @@ func Collect(options CollectOptions) (Manifest, error) {
 		Runtime:             runtimeMetadata,
 		Seed:                options.Seed,
 		EffectiveConfig:     append(json.RawMessage(nil), options.EffectiveConfig...),
+		FinalTestSealed:     options.FinalTestSealed,
 	}
 	if err := manifest.Validate(); err != nil {
 		return Manifest{}, err
@@ -203,7 +215,11 @@ func (manifest Manifest) Validate() error {
 	if err := validateArtifacts("validation split", manifest.Splits.Validation); err != nil {
 		return err
 	}
-	if err := validateArtifacts("test split", manifest.Splits.Test); err != nil {
+	if manifest.FinalTestSealed {
+		if len(manifest.Splits.Test) != 0 {
+			return errors.New("sealed final-test manifest must not contain test-split artifacts")
+		}
+	} else if err := validateArtifacts("test split", manifest.Splits.Test); err != nil {
 		return err
 	}
 	if manifest.ModelParameterCount <= 0 {

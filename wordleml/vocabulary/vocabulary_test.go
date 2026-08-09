@@ -78,6 +78,27 @@ func TestSolutionActionMappingPreservesIDs(t *testing.T) {
 	}
 }
 
+func TestLoadWithoutFinalTestDoesNotRequireOrRepresentTestWordlist(t *testing.T) {
+	source := testDataDir(t)
+	sealedDir := t.TempDir()
+	for _, name := range []string{actionSpaceFilename, allSolutionsFilename, trainingFilename, validationFilename} {
+		contents, err := os.ReadFile(filepath.Join(source, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(sealedDir, name), contents, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	vocab, err := LoadWithoutFinalTest(sealedDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(vocab.Training()) != NumTrainingSolutions || len(vocab.Validation()) != NumValidationSolutions || len(vocab.Test()) != 0 || vocab.Hashes().Test != "" {
+		t.Fatalf("sealed vocabulary split/hash state = train %d validation %d test %d hashes %#v", len(vocab.Training()), len(vocab.Validation()), len(vocab.Test()), vocab.Hashes())
+	}
+}
+
 func testDataDir(t *testing.T) string {
 	t.Helper()
 	if dataDir := os.Getenv("WORDLEML_DATA_DIR"); dataDir != "" {

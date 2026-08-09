@@ -193,6 +193,33 @@ func TestValidateRejectsIncompleteCUDARuntimeDetails(t *testing.T) {
 	}
 }
 
+func TestManifestAcceptsSealedFinalTestWithJSONNull(t *testing.T) {
+	manifest := validManifest()
+	manifest.FinalTestSealed = true
+	manifest.Splits.Test = nil
+	contents, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(contents), `"final_test_sealed_unopened":true`) || !strings.Contains(string(contents), `"test":null`) {
+		t.Fatalf("sealed manifest JSON = %s", contents)
+	}
+	var decoded Manifest
+	if err := json.Unmarshal(contents, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if !decoded.FinalTestSealed || decoded.Splits.Test != nil {
+		t.Fatalf("decoded sealed state = %#v", decoded)
+	}
+	if err := decoded.Validate(); err != nil {
+		t.Fatalf("Validate sealed manifest: %v", err)
+	}
+	decoded.Splits.Test = []Artifact{{Path: "test", SHA256: strings.Repeat("a", 64)}}
+	if err := decoded.Validate(); err == nil || !strings.Contains(err.Error(), "must not contain") {
+		t.Fatalf("sealed manifest with test artifact error = %v", err)
+	}
+}
+
 func TestVerifyEvaluationInputsRejectsAlteredValidationAndVocabularyBeforeLoad(t *testing.T) {
 	dataDir := t.TempDir()
 	validationBin := writeFile(t, filepath.Join(dataDir, "imitation", "wordle-validation.bin"), "validation binary")

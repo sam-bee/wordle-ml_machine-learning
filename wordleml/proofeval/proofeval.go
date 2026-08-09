@@ -136,7 +136,12 @@ func Run(ctx context.Context, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	vocab, err := vocabulary.Load(options.DataDir)
+	var vocab *vocabulary.Vocabulary
+	if config.Stage == proofrun.SeedReplication {
+		vocab, err = vocabulary.LoadWithoutFinalTest(options.DataDir)
+	} else {
+		vocab, err = vocabulary.Load(options.DataDir)
+	}
 	if err != nil {
 		return Result{}, fmt.Errorf("load vocabulary: %w", err)
 	}
@@ -230,7 +235,7 @@ func Run(ctx context.Context, options Options) (Result, error) {
 // preflight after config parsing: a failed mini, full, or production gate must
 // not load data, create a CUDA backend, or publish any evaluation artifact.
 func validateEvaluationTrainingComplete(layout runstate.Layout, stage proofrun.Stage) error {
-	if stage != proofrun.Mini && stage != proofrun.Full && stage != proofrun.Production {
+	if stage != proofrun.Mini && stage != proofrun.Full && !proofrun.IsProductionStyle(stage) {
 		return nil
 	}
 	contents, err := os.ReadFile(layout.FinalMetricsPath)
@@ -252,7 +257,7 @@ func validateEvaluationTrainingComplete(layout runstate.Layout, stage proofrun.S
 
 func isCanonicalReportTrajectory(stage proofrun.Stage, checkpoint Checkpoint, mode Mode) bool {
 	return (stage == proofrun.Mini && checkpoint == Latest && mode == Games10) ||
-		((stage == proofrun.Full || stage == proofrun.Production) && checkpoint == Best && mode == Games100)
+		((stage == proofrun.Full || proofrun.IsProductionStyle(stage)) && checkpoint == Best && mode == Games100)
 }
 
 // verifyEvaluationMetadata runs before vocabulary.Load or imitationdata.Load,
@@ -295,7 +300,7 @@ func persistEvaluation(layout runstate.Layout, result Result) error {
 	if training.Stage != result.Stage {
 		return fmt.Errorf("final metrics stage %q differs from evaluation stage %q", training.Stage, result.Stage)
 	}
-	if (training.Stage == proofrun.Mini || training.Stage == proofrun.Full || training.Stage == proofrun.Production) && !training.Passed {
+	if (training.Stage == proofrun.Mini || training.Stage == proofrun.Full || proofrun.IsProductionStyle(training.Stage)) && !training.Passed {
 		return fmt.Errorf("refusing to persist %s evaluation before %s training has passed", result.Mode, training.Stage)
 	}
 	var document map[string]json.RawMessage
@@ -377,7 +382,7 @@ func validateCombination(stage proofrun.Stage, checkpoint Checkpoint, mode Mode)
 			return nil
 		}
 	case Games100:
-		if (stage == proofrun.Full || stage == proofrun.Production) && checkpoint == Best {
+		if (stage == proofrun.Full || proofrun.IsProductionStyle(stage)) && checkpoint == Best {
 			return nil
 		}
 		if stage == proofrun.Full && checkpoint == Initial {

@@ -15,6 +15,9 @@ import (
 const (
 	// Seed is the one fixed seed used by all proof stages.
 	Seed int64 = 20260808
+	// SeedReplicationSeed is the single predeclared independent-initialization
+	// replication seed. It is not a general seed-selection surface.
+	SeedReplicationSeed int64 = 20260809
 
 	validationEvery = int64(100)
 	checkpointEvery = int64(100)
@@ -32,7 +35,16 @@ const (
 	// from Full so the retained 2,000-update proof configuration and gate never
 	// change meaning.
 	Production Stage = "production"
+	// SeedReplication is the single fixed production-style robustness run. Its
+	// only configuration difference from Production is SeedReplicationSeed.
+	SeedReplication Stage = "seed-replication"
 )
+
+// IsProductionStyle reports whether stage uses the resumable 10,000-update
+// production safety, telemetry, completion, and evaluation contracts.
+func IsProductionStyle(stage Stage) bool {
+	return stage == Production || stage == SeedReplication
+}
 
 // Config is recorded verbatim in config.json and is intentionally limited to
 // the plan's fixed choices.
@@ -85,6 +97,11 @@ func ConfigFor(stage Stage) (Config, error) {
 		config.BatchSize = 256
 		config.LearningRate = 3e-4
 		config.TargetUpdates = 10000
+	case SeedReplication:
+		config.BatchSize = 256
+		config.LearningRate = 3e-4
+		config.TargetUpdates = 10000
+		config.Seed = SeedReplicationSeed
 	default:
 		return Config{}, fmt.Errorf("unknown proof stage %q", stage)
 	}
