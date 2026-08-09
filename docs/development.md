@@ -16,6 +16,12 @@ The Compose project has four services:
 - `tensorboard` runs TensorBoard from the official TensorFlow 2.20 image and reads self-contained run event directories
   below `runs/`. No GPU is passed to `web` or `tensorboard`.
 
+TensorBoard uses its standard protobuf loader rather than the experimental
+fast loader. This preserves the complete scalar histories in retained runs
+whose pre-fix histogram records were labelled with the protobuf audio field.
+Those immutable event files are not rewritten. New runs use TensorFlow's
+canonical histogram field and expose both scalar lines and histogram panels.
+
 `make monitoring` starts inference, web, and TensorBoard. Only web and TensorBoard bind host ports, both on loopback;
 the GPU API remains private to the Compose network.
 
