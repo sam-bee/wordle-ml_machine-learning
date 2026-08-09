@@ -104,6 +104,20 @@ gradually and keep the Wordle problem visible throughout, rather than turning in
   the fixed validation games versus 4/100 at initialization, reducing mean
   guesses from 5.86 to 3.65. Present this as a bounded proof result, not a
   generalization claim: validation guides choices and final test stays sealed.
+- Follow the proof with one fresh, fixed production continuation: the same
+  full training split, encoder, policy, objective, opening-state sampling,
+  seed, optimizer, batch size, learning rate, and clipping; the only planned
+  difference is the 10,000-update budget. That is a longer confirmation run,
+  not a hyperparameter search or a retroactive change to the proof.
+- Explain the production handoff in engineering terms: immutable provenance;
+  initial/latest/best checkpoints; complete optimizer and sampler resume
+  state; telemetry every 10 updates; validation and latest snapshots every
+  100; numerical-safety checks; and a separate post-training reload before
+  all 100 validation games are played.
+- When its generated production report exists, compare its best checkpoint
+  with the retained 2,000-update proof best on validation loss/top-k agreement
+  and solved fraction/mean guesses/guess distribution. Do not prestate the
+  result, turn validation into a generalization claim, or open the final test.
 - For the live demo, select a validation solution in the web application. Its
   Go server proxies one same-origin request to the internal inference service;
   the Go host advances the authoritative game and encodes each state, while up

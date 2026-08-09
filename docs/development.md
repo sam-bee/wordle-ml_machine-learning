@@ -117,6 +117,46 @@ Each run contains `config.json`, `metadata.json`, `run-state.json`, `final-metri
 `checkpoints/{initial,latest,best}`, and an `evaluations/` directory. Evaluation writes structured results and game
 JSONL there, appends game summary scalars to the run's events, and only evaluates the frozen validation split.
 
+## Production-run handoff
+
+The proof sequence above remains historical and fixed. The first production
+run is a separate, single fixed chain; it must not reuse a proof run ID or
+checkpoint. Run its preflight first and do not launch if any step fails:
+
+```console
+make format
+make test
+make smoke
+```
+
+Commit and push the implementation, verify a clean worktree, and use a fresh
+timestamped ID to start the chain:
+
+```console
+docker compose run --rm --no-deps wordleml go run ./cmd/production -run-id=<timestamped-id>
+```
+
+This command fixes the full training split, existing opening-state sampling,
+FP32 Adam, batch size 256, constant learning rate 0.0003, global clip norm 5,
+seed 20260808, and 10,000 updates. It emits scalars every 10 updates;
+validates and writes `latest` every 100; and writes `best` on validation-loss
+improvement. Its immutable run directory records configuration, provenance,
+checkpoints, complete optimizer/sampler resume state, TensorBoard events,
+training log, validation snapshots, finite-number safety checks, and atomic
+final metrics.
+
+To hand an interrupted or detached run to another operator, retain the run ID
+and use the same command to resume it. Check the outer chain status at
+`runs/<timestamped-id>.status.json` and the checkpoint state at
+`runs/<timestamped-id>/run-state.json`, follow
+`runs/<timestamped-id>/training.log`, and use
+`tensorboard --logdir runs/<timestamped-id>/events` (or the project
+TensorBoard service) for live status. After successful training, the command
+independently verifies its best checkpoint and runs all 100 validation games,
+then atomically creates the validation-only comparison at
+`docs/ml/production-training-report.md`. The final-test split is never opened;
+any failure stops the post-training chain with retained status and logs.
+
 The recorded train/validation state-overlap audit is not solution-split
 leakage: solution IDs remain disjoint, while 190 of 2,445 unique validation
 encoded states also occur in training with agreeing teacher labels.
