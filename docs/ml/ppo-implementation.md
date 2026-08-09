@@ -139,7 +139,9 @@ target.
 ## Fixed initial pilot configuration
 
 [`configs/rl/ppo-pilot-v1.json`](../../configs/rl/ppo-pilot-v1.json) is the
-versioned configuration. Its conservative initial settings are:
+versioned first-seed configuration. The conditional replication uses
+[`configs/rl/ppo-pilot-v1-seed2.json`](../../configs/rl/ppo-pilot-v1-seed2.json),
+which changes only the run ID and random seed. The conservative settings are:
 
 | Setting | Value |
 | --- | ---: |

@@ -3,6 +3,7 @@ package experiment
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -39,5 +40,25 @@ func TestLoadConfigRejectsUnknownAndOpenEndedConfig(t *testing.T) {
 	config.PilotIterations = 100
 	if err := config.Validate(); err == nil {
 		t.Fatal("Validate accepted open-ended iteration count")
+	}
+}
+
+func TestSecondSeedReplicationConfigChangesOnlyRunIdentityAndSeed(t *testing.T) {
+	configDir := filepath.Join("..", "..", "..", "configs", "rl")
+	first, err := LoadConfig(filepath.Join(configDir, "ppo-pilot-v1.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := LoadConfig(filepath.Join(configDir, "ppo-pilot-v1-seed2.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.RunID == second.RunID || first.Seed == second.Seed {
+		t.Fatalf("replication must have a distinct run ID and seed: first=%s/%d second=%s/%d", first.RunID, first.Seed, second.RunID, second.Seed)
+	}
+	second.RunID = first.RunID
+	second.Seed = first.Seed
+	if !reflect.DeepEqual(first, second) {
+		t.Fatalf("second-seed config differs in more than run identity and seed:\nfirst=%+v\nsecond=%+v", first, second)
 	}
 }
