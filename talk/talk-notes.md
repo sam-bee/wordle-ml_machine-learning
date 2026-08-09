@@ -123,11 +123,15 @@ gradually and keep the Wordle problem visible throughout, rather than turning in
   is a useful lesson: a small validation metric improvement did not improve
   this gameplay success rate. Keep the claim validation-only and the final
   test sealed.
-- For the live demo, select a validation solution in the web application. Its
-  Go server proxies one same-origin request to the internal inference service;
-  the Go host advances the authoritative game and encodes each state, while up
-  to six policy forward passes execute through GoMLX on CUDA. The browser then
-  animates the returned trajectory without receiving GPU access.
+- For the live demo, use the web application's run picker to contrast the
+  retained proof and production best checkpoints. Changing the selection
+  restores and warms that checkpoint on CUDA before it becomes active; the
+  original model remains available if loading fails. Then select a validation
+  solution. The Go server proxies same-origin requests to the internal
+  inference service; the Go host advances the authoritative game and encodes
+  each state, while up to six policy forward passes execute through GoMLX on
+  CUDA. The browser animates the returned trajectory without receiving GPU
+  access.
 
 ## Later structure
 

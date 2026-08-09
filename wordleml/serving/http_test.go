@@ -11,33 +11,47 @@ import (
 	"github.com/sam-bee/wordle-ml_machine-learning/gameeval"
 )
 
-type fakePlayer struct {
+type fakeService struct {
 	identity  ModelIdentity
+	models    []ModelSummary
 	solutions []string
 	game      gameeval.GameResult
 	err       error
 	requested string
+	selected  string
 }
 
-func (player *fakePlayer) ModelIdentity() ModelIdentity { return player.identity }
-func (player *fakePlayer) ValidationSolutions() []string {
-	return append([]string(nil), player.solutions...)
+func (service *fakeService) ModelIdentity() ModelIdentity { return service.identity }
+func (service *fakeService) ValidationSolutions() []string {
+	return append([]string(nil), service.solutions...)
 }
-func (player *fakePlayer) Play(_ context.Context, solution string) (gameeval.GameResult, error) {
-	player.requested = solution
-	return player.game, player.err
+func (service *fakeService) PlayGame(_ context.Context, solution string) (GameResponse, error) {
+	service.requested = solution
+	return GameResponse{Model: service.identity, GameResult: service.game}, service.err
+}
+func (service *fakeService) AvailableModels() ([]ModelSummary, error) {
+	return append([]ModelSummary(nil), service.models...), service.err
+}
+func (service *fakeService) SelectModel(_ context.Context, runID string) (ModelIdentity, error) {
+	service.selected = runID
+	if service.err != nil {
+		return ModelIdentity{}, service.err
+	}
+	service.identity.RunID = runID
+	return service.identity, nil
 }
 
 func TestHandlerServesSolutionsAndGame(t *testing.T) {
-	player := &fakePlayer{
+	service := &fakeService{
 		identity:  ModelIdentity{RunID: "full-1", Checkpoint: "best", Update: 2000, TrainingCommit: "abc", ValidationSplitHash: "def"},
+		models:    []ModelSummary{{RunID: "full-1", Stage: "full", Checkpoint: "best", Update: 2000}, {RunID: "production-1", Stage: "production", Checkpoint: "best", Update: 2200}},
 		solutions: []string{"ADEPT", "VODKA"},
 		game: gameeval.GameResult{
 			Solution: "VODKA", Solved: true, Guesses: 2,
 			Turns: []gameeval.TurnResult{{Turn: 1, RawTopActionID: 7, RawTopGuess: "ARISE", Guess: "ARISE", Feedback: "-----", ShortlistSizeBefore: 2309, ShortlistSizeAfter: 167}},
 		},
 	}
-	handler, err := NewHandler(player)
+	handler, err := NewHandler(service)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,8 +69,8 @@ func TestHandlerServesSolutionsAndGame(t *testing.T) {
 	if response.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
 	}
-	if player.requested != "vodka" {
-		t.Fatalf("requested solution = %q", player.requested)
+	if service.requested != "vodka" {
+		t.Fatalf("requested solution = %q", service.requested)
 	}
 	var result struct {
 		Model ModelIdentity `json:"model"`
@@ -73,9 +87,52 @@ func TestHandlerServesSolutionsAndGame(t *testing.T) {
 	}
 }
 
+func TestHandlerListsAndSelectsModels(t *testing.T) {
+	service := &fakeService{
+		identity: ModelIdentity{RunID: "full-1", Stage: "full", Checkpoint: "best", Update: 2000},
+		models: []ModelSummary{
+			{RunID: "full-1", Stage: "full", Checkpoint: "best", Update: 2000},
+			{RunID: "production-1", Stage: "production", Checkpoint: "best", Update: 2200},
+		},
+	}
+	handler, err := NewHandler(service)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	models := httptest.NewRecorder()
+	handler.ServeHTTP(models, httptest.NewRequest(http.MethodGet, "/v1/models", nil))
+	if models.Code != http.StatusOK || !strings.Contains(models.Body.String(), `"active":{"run_id":"full-1"`) || !strings.Contains(models.Body.String(), `"run_id":"production-1"`) {
+		t.Fatalf("models response = (%d, %s)", models.Code, models.Body.String())
+	}
+
+	request := httptest.NewRequest(http.MethodPut, "/v1/models", strings.NewReader(`{"run_id":"production-1"}`))
+	request.Header.Set("Content-Type", "application/json")
+	selected := httptest.NewRecorder()
+	handler.ServeHTTP(selected, request)
+	if selected.Code != http.StatusOK || service.selected != "production-1" || !strings.Contains(selected.Body.String(), `"run_id":"production-1"`) {
+		t.Fatalf("selection response = (%d, %s), selected = %q", selected.Code, selected.Body.String(), service.selected)
+	}
+}
+
+func TestHandlerRejectsUnavailableModel(t *testing.T) {
+	service := &fakeService{err: ErrModelNotFound}
+	handler, err := NewHandler(service)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPut, "/v1/models", strings.NewReader(`{"run_id":"missing"}`))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d; body = %s", response.Code, http.StatusNotFound, response.Body.String())
+	}
+}
+
 func TestHandlerRejectsInvalidRequests(t *testing.T) {
-	player := &fakePlayer{err: ErrInvalidSolution}
-	handler, err := NewHandler(player)
+	service := &fakeService{err: ErrInvalidSolution}
+	handler, err := NewHandler(service)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,8 +161,8 @@ func TestHandlerRejectsInvalidRequests(t *testing.T) {
 }
 
 func TestHandlerMapsTimeout(t *testing.T) {
-	player := &fakePlayer{err: context.DeadlineExceeded}
-	handler, err := NewHandler(player)
+	service := &fakeService{err: context.DeadlineExceeded}
+	handler, err := NewHandler(service)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,8 +175,8 @@ func TestHandlerMapsTimeout(t *testing.T) {
 	}
 }
 
-func TestNewHandlerRequiresPlayer(t *testing.T) {
-	if _, err := NewHandler(nil); err == nil || err.Error() != "inference player is required" {
+func TestNewHandlerRequiresService(t *testing.T) {
+	if _, err := NewHandler(nil); err == nil || err.Error() != "inference service is required" {
 		t.Fatalf("error = %v", err)
 	}
 }

@@ -21,6 +21,9 @@ func TestSplashPage(t *testing.T) {
 	if !strings.Contains(response.Body.String(), "Wordle ML") {
 		t.Fatalf("splash page does not contain project name: %q", response.Body.String())
 	}
+	if !strings.Contains(response.Body.String(), `id="model"`) {
+		t.Fatalf("splash page does not contain the model selector: %q", response.Body.String())
+	}
 }
 
 func TestHealth(t *testing.T) {
@@ -44,6 +47,22 @@ func TestInferenceProxy(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		response.Header().Set("Content-Type", "application/json")
 		switch request.URL.Path {
+		case "/v1/models":
+			if request.Method == http.MethodGet {
+				_, _ = response.Write([]byte(`{"active":{"run_id":"full-1"},"models":[{"run_id":"full-1"},{"run_id":"production-1"}]}`))
+				return
+			}
+			if request.Method != http.MethodPut || request.Header.Get("Content-Type") != "application/json" {
+				t.Errorf("model request = (%s, %q)", request.Method, request.Header.Get("Content-Type"))
+			}
+			body, err := io.ReadAll(request.Body)
+			if err != nil {
+				t.Error(err)
+			}
+			if string(body) != `{"run_id":"production-1"}` {
+				t.Errorf("model body = %s", body)
+			}
+			_, _ = response.Write([]byte(`{"model":{"run_id":"production-1"}}`))
 		case "/v1/solutions":
 			if request.Method != http.MethodGet {
 				t.Errorf("solutions method = %s", request.Method)
@@ -72,10 +91,12 @@ func TestInferenceProxy(t *testing.T) {
 	}
 
 	for _, request := range []*http.Request{
+		httptest.NewRequest(http.MethodGet, "/api/models", nil),
+		httptest.NewRequest(http.MethodPut, "/api/models", strings.NewReader(`{"run_id":"production-1"}`)),
 		httptest.NewRequest(http.MethodGet, "/api/solutions", nil),
 		httptest.NewRequest(http.MethodPost, "/api/games", strings.NewReader(`{"solution":"VODKA"}`)),
 	} {
-		if request.Method == http.MethodPost {
+		if request.Method == http.MethodPost || request.Method == http.MethodPut {
 			request.Header.Set("Content-Type", "application/json")
 		}
 		response := httptest.NewRecorder()

@@ -1,4 +1,4 @@
-// Package serving loads one immutable proof checkpoint and exposes the
+// Package serving loads immutable training checkpoints and exposes the
 // production game path through a small, serialized inference runtime.
 package serving
 
@@ -27,7 +27,7 @@ import (
 // solutions. The final-test split deliberately remains unavailable.
 var ErrInvalidSolution = errors.New("solution is not an allowed validation word")
 
-// Options identifies the one self-contained full proof run to serve.
+// Options identifies one self-contained training run to serve.
 type Options struct {
 	DataDir string
 	RunsDir string
@@ -37,14 +37,15 @@ type Options struct {
 // ModelIdentity is returned with every game so a result remains attributable
 // to the exact checkpoint and training source revision that produced it.
 type ModelIdentity struct {
-	RunID               string `json:"run_id"`
-	Checkpoint          string `json:"checkpoint"`
-	Update              int64  `json:"update"`
-	TrainingCommit      string `json:"training_commit"`
-	ValidationSplitHash string `json:"validation_split_hash"`
+	RunID               string         `json:"run_id"`
+	Stage               proofrun.Stage `json:"stage"`
+	Checkpoint          string         `json:"checkpoint"`
+	Update              int64          `json:"update"`
+	TrainingCommit      string         `json:"training_commit"`
+	ValidationSplitHash string         `json:"validation_split_hash"`
 }
 
-// Player is the narrow interface used by the HTTP API and its host-only tests.
+// Player is the narrow interface the model manager uses for one loaded run.
 type Player interface {
 	ModelIdentity() ModelIdentity
 	ValidationSolutions() []string
@@ -85,10 +86,7 @@ func Load(ctx context.Context, options Options) (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
-	if config.Stage != proofrun.Full {
-		return nil, fmt.Errorf("inference serving requires a full proof run, got %q", config.Stage)
-	}
-	final, err := readPassedFullResult(layout)
+	final, err := readPassedResult(layout, config)
 	if err != nil {
 		return nil, err
 	}
@@ -125,7 +123,7 @@ func Load(ctx context.Context, options Options) (*Runtime, error) {
 		allowed:   make(map[string]struct{}, vocabulary.NumValidationSolutions),
 		gate:      make(chan struct{}, 1),
 		identity: ModelIdentity{
-			RunID: options.RunID, Checkpoint: string(proofeval.Best), Update: state.GlobalUpdate,
+			RunID: options.RunID, Stage: config.Stage, Checkpoint: string(proofeval.Best), Update: state.GlobalUpdate,
 			TrainingCommit: manifest.Repositories.MachineLearning.Commit, ValidationSplitHash: vocab.Hashes().Validation,
 		},
 	}
@@ -202,7 +200,7 @@ func (runtime *Runtime) play(ctx context.Context, solution string) (gameeval.Gam
 }
 
 // Close releases the restored session and CUDA backend. It is idempotent and
-// must be called only after the HTTP server has stopped accepting requests.
+// must be called only when no inference request is using this runtime.
 func (runtime *Runtime) Close() {
 	if runtime == nil {
 		return
@@ -220,7 +218,7 @@ func (runtime *Runtime) Close() {
 	})
 }
 
-func readPassedFullResult(layout runstate.Layout) (proofrun.Result, error) {
+func readPassedResult(layout runstate.Layout, config proofrun.Config) (proofrun.Result, error) {
 	contents, err := os.ReadFile(layout.FinalMetricsPath)
 	if err != nil {
 		return proofrun.Result{}, fmt.Errorf("read final inference metrics: %w", err)
@@ -229,8 +227,8 @@ func readPassedFullResult(layout runstate.Layout) (proofrun.Result, error) {
 	if err := json.Unmarshal(contents, &result); err != nil {
 		return proofrun.Result{}, fmt.Errorf("decode final inference metrics: %w", err)
 	}
-	if result.Stage != proofrun.Full || !result.Passed || result.GlobalUpdate <= 0 || result.BestValidationStep <= 0 {
-		return proofrun.Result{}, errors.New("inference run has not passed the full proof gate")
+	if result.Stage != config.Stage || !result.Passed || result.GlobalUpdate != config.TargetUpdates || result.BestValidationStep < 0 || result.BestValidationStep > result.GlobalUpdate {
+		return proofrun.Result{}, fmt.Errorf("inference run has not completed its %q gate", config.Stage)
 	}
 	return result, nil
 }

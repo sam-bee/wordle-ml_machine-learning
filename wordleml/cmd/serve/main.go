@@ -1,5 +1,5 @@
-// Command serve loads one passed full-run best checkpoint and serves complete
-// validation Wordle games from a warm CUDA inference session.
+// Command serve loads one completed run's best checkpoint, permits selecting
+// other completed runs, and serves validation games from warm CUDA inference.
 package main
 
 import (
@@ -40,12 +40,12 @@ func run(args []string, stdout, stderr io.Writer) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	runtime, err := serving.Load(ctx, serving.Options{DataDir: config.dataDir, RunsDir: config.runsDir, RunID: config.runID})
+	manager, err := serving.LoadManager(ctx, serving.Options{DataDir: config.dataDir, RunsDir: config.runsDir, RunID: config.runID})
 	if err != nil {
 		return err
 	}
-	defer runtime.Close()
-	handler, err := serving.NewHandler(runtime)
+	defer manager.Close()
+	handler, err := serving.NewHandler(manager)
 	if err != nil {
 		return err
 	}
@@ -54,7 +54,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
-		WriteTimeout:      45 * time.Second,
+		WriteTimeout:      2 * time.Minute,
 		IdleTimeout:       60 * time.Second,
 	}
 	go func() {
@@ -63,7 +63,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 		defer cancel()
 		_ = server.Shutdown(shutdownContext)
 	}()
-	identity := runtime.ModelIdentity()
+	identity := manager.ModelIdentity()
 	fmt.Fprintf(stdout, "serving run=%s checkpoint=%s update=%d address=%s\n", identity.RunID, identity.Checkpoint, identity.Update, config.address)
 	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
@@ -88,14 +88,14 @@ func parseConfig(args []string, stderr io.Writer) (config, error) {
 	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	flags.Usage = func() {
-		fmt.Fprintln(stderr, "usage: serve -run-id=<passed-full-run-id> [flags]")
+		fmt.Fprintln(stderr, "usage: serve -run-id=<completed-run-id> [flags]")
 		flags.PrintDefaults()
 	}
 	var config config
 	flags.StringVar(&config.address, "addr", address, "HTTP listen address")
 	flags.StringVar(&config.dataDir, "data-dir", dataDir, "directory containing frozen vocabularies")
-	flags.StringVar(&config.runsDir, "runs-dir", runsDir, "directory containing self-contained proof runs")
-	flags.StringVar(&config.runID, "run-id", runID, "required passed full proof-run identifier")
+	flags.StringVar(&config.runsDir, "runs-dir", runsDir, "directory containing self-contained training runs")
+	flags.StringVar(&config.runID, "run-id", runID, "required initially selected completed run identifier")
 	if err := flags.Parse(args); err != nil {
 		return config, err
 	}

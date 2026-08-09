@@ -32,10 +32,13 @@ Once monitoring is running, open:
 - live Wordle policy: <http://127.0.0.1:8082>
 - TensorBoard: <http://127.0.0.1:6007>
 
-The visualiser loads the best checkpoint from `WORDLEML_INFERENCE_RUN_ID`
-(`proof-full-20260808` by default), offers the fixed validation solutions, and
-animates a complete game returned by the internal CUDA inference API. The
-browser and web container never receive direct GPU access.
+The visualiser initially loads the best checkpoint from
+`WORDLEML_INFERENCE_RUN_ID` (`proof-full-20260808` by default). Its model picker
+lists completed compatible runs beneath `runs/`; selecting one restores and
+warms that run's best checkpoint on the CUDA device before inference continues.
+The interface also offers the fixed validation solutions and animates a
+complete game returned by the internal CUDA inference API. The browser and web
+container never receive direct GPU access.
 
 Proof runs write scalar and histogram events under `runs/<run-id>/events`, which TensorBoard discovers beneath
 `runs/`. See

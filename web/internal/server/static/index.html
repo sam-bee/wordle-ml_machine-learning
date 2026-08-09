@@ -15,8 +15,9 @@
           <p class="eyebrow">Go · GoMLX · CUDA</p>
           <h1>Watch the policy play Wordle.</h1>
           <p class="lede">
-            Choose one of the fixed validation words. The Go host runs the
-            authoritative game while every policy decision executes on the GPU.
+            Choose a trained run and one of the fixed validation words. The Go
+            host loads that run's best checkpoint onto the GPU, runs the
+            authoritative game, and executes each policy decision on-device.
           </p>
         </div>
         <div class="runtime-card" aria-live="polite">
@@ -32,11 +33,19 @@
             <h2 id="play-heading">Pick the hidden solution</h2>
           </div>
           <form id="game-form">
-            <label for="solution">Solution</label>
             <div class="form-row">
-              <select id="solution" name="solution" disabled>
-                <option>Loading validation words…</option>
-              </select>
+              <div class="form-field model-field">
+                <label for="model">Model run</label>
+                <select id="model" name="model" disabled>
+                  <option>Loading trained runs…</option>
+                </select>
+              </div>
+              <div class="form-field solution-field">
+                <label for="solution">Solution</label>
+                <select id="solution" name="solution" disabled>
+                  <option>Loading validation words…</option>
+                </select>
+              </div>
               <button id="play-button" type="submit" disabled>Run inference</button>
             </div>
           </form>

@@ -1,6 +1,7 @@
 "use strict";
 
 const form = document.querySelector("#game-form");
+const modelSelect = document.querySelector("#model");
 const solutionSelect = document.querySelector("#solution");
 const playButton = document.querySelector("#play-button");
 const message = document.querySelector("#message");
@@ -11,6 +12,8 @@ const board = document.querySelector("#board");
 const runtimeStatus = document.querySelector("#runtime-status");
 const statusDot = document.querySelector("#status-dot");
 const modelIdentity = document.querySelector("#model-identity");
+let activeRunID = "";
+let controlsReady = false;
 
 function setMessage(text, isError = false) {
   message.textContent = text;
@@ -24,7 +27,18 @@ function delay(milliseconds) {
 
 function modelLabel(model) {
   const commit = model.training_commit ? model.training_commit.slice(0, 8) : "unknown";
-  return `${model.run_id} · ${model.checkpoint}@${model.update} · source ${commit}`;
+  const stage = model.stage ? `${model.stage} · ` : "";
+  return `${model.run_id} · ${stage}${model.checkpoint}@${model.update} · source ${commit}`;
+}
+
+function modelOptionLabel(model) {
+  return `${model.run_id} · ${model.stage} · ${model.checkpoint}@${model.update}`;
+}
+
+function setControlsDisabled(disabled) {
+  modelSelect.disabled = disabled || !controlsReady;
+  solutionSelect.disabled = disabled || !controlsReady;
+  playButton.disabled = disabled || !controlsReady;
 }
 
 async function responseJSON(response) {
@@ -35,22 +49,37 @@ async function responseJSON(response) {
   return payload;
 }
 
-async function loadSolutions() {
+async function loadPage() {
   try {
-    const payload = await responseJSON(await fetch("/api/solutions", {headers: {Accept: "application/json"}}));
+    const [modelsPayload, solutionsPayload] = await Promise.all([
+      fetch("/api/models", {headers: {Accept: "application/json"}}).then(responseJSON),
+      fetch("/api/solutions", {headers: {Accept: "application/json"}}).then(responseJSON),
+    ]);
+    if (!modelsPayload.models.length) throw new Error("No completed model runs are available");
+
+    modelSelect.replaceChildren();
+    for (const model of modelsPayload.models) {
+      const option = document.createElement("option");
+      option.value = model.run_id;
+      option.textContent = modelOptionLabel(model);
+      modelSelect.append(option);
+    }
+    activeRunID = modelsPayload.active.run_id;
+    modelSelect.value = activeRunID;
+
     solutionSelect.replaceChildren();
-    for (const solution of payload.solutions) {
+    for (const solution of solutionsPayload.solutions) {
       const option = document.createElement("option");
       option.value = solution;
       option.textContent = solution;
       solutionSelect.append(option);
     }
     runtimeStatus.textContent = "CUDA inference ready";
-    modelIdentity.textContent = modelLabel(payload.model);
+    modelIdentity.textContent = modelLabel(modelsPayload.active);
     statusDot.classList.remove("loading", "error");
-    solutionSelect.disabled = false;
-    playButton.disabled = false;
-    setMessage("Choose a solution and run a complete game.");
+    controlsReady = true;
+    setControlsDisabled(false);
+    setMessage("Choose a model run and solution, then run a complete game.");
   } catch (error) {
     runtimeStatus.textContent = "Inference unavailable";
     statusDot.classList.remove("loading");
@@ -58,6 +87,39 @@ async function loadSolutions() {
     setMessage(error.message, true);
   }
 }
+
+modelSelect.addEventListener("change", async () => {
+  const requestedRunID = modelSelect.value;
+  const previousRunID = activeRunID;
+  setControlsDisabled(true);
+  gameResult.hidden = true;
+  runtimeStatus.textContent = "Loading model onto CUDA…";
+  statusDot.classList.remove("error");
+  statusDot.classList.add("loading");
+  setMessage(`Loading ${requestedRunID} and warming on-device inference…`);
+  try {
+    const response = await fetch("/api/models", {
+      method: "PUT",
+      headers: {"Content-Type": "application/json", Accept: "application/json"},
+      body: JSON.stringify({run_id: requestedRunID}),
+    });
+    const payload = await responseJSON(response);
+    activeRunID = payload.model.run_id;
+    modelSelect.value = activeRunID;
+    modelIdentity.textContent = modelLabel(payload.model);
+    runtimeStatus.textContent = "CUDA inference ready";
+    statusDot.classList.remove("loading", "error");
+    setMessage(`${activeRunID} is loaded on-device. Choose a solution to run inference.`);
+  } catch (error) {
+    modelSelect.value = previousRunID;
+    runtimeStatus.textContent = previousRunID ? `${previousRunID} remains active` : "Inference unavailable";
+    statusDot.classList.remove("loading");
+    statusDot.classList.add("error");
+    setMessage(error.message, true);
+  } finally {
+    setControlsDisabled(false);
+  }
+});
 
 function feedbackClass(symbol) {
   if (symbol === "G") return "correct";
@@ -105,8 +167,7 @@ async function animateGame(game) {
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
-  playButton.disabled = true;
-  solutionSelect.disabled = true;
+  setControlsDisabled(true);
   gameResult.hidden = true;
   setMessage(`Running CUDA inference for ${solutionSelect.value}…`);
   try {
@@ -116,14 +177,17 @@ form.addEventListener("submit", async (event) => {
       body: JSON.stringify({solution: solutionSelect.value}),
     });
     const game = await responseJSON(response);
+    activeRunID = game.model.run_id;
+    if ([...modelSelect.options].some((option) => option.value === activeRunID)) {
+      modelSelect.value = activeRunID;
+    }
     modelIdentity.textContent = modelLabel(game.model);
     await animateGame(game);
   } catch (error) {
     setMessage(error.message, true);
   } finally {
-    playButton.disabled = false;
-    solutionSelect.disabled = false;
+    setControlsDisabled(false);
   }
 });
 
-loadSolutions();
+loadPage();

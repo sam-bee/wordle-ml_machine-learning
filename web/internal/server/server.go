@@ -20,7 +20,7 @@ const (
 	defaultInferenceURL         = "http://inference:8090"
 	maximumProxyRequestBytes    = 4096
 	maximumProxyResponseBytes   = 1 << 20
-	defaultInferenceHTTPTimeout = 45 * time.Second
+	defaultInferenceHTTPTimeout = 2 * time.Minute
 )
 
 // Config supplies the internal inference upstream. It is never sent to the
@@ -64,6 +64,12 @@ func NewHandler(config Config) (http.Handler, error) {
 	})
 	mux.HandleFunc("GET /api/solutions", func(response http.ResponseWriter, request *http.Request) {
 		proxyInference(response, request, client, baseURL, "/v1/solutions")
+	})
+	mux.HandleFunc("GET /api/models", func(response http.ResponseWriter, request *http.Request) {
+		proxyInference(response, request, client, baseURL, "/v1/models")
+	})
+	mux.HandleFunc("PUT /api/models", func(response http.ResponseWriter, request *http.Request) {
+		proxyInference(response, request, client, baseURL, "/v1/models")
 	})
 	mux.HandleFunc("POST /api/games", func(response http.ResponseWriter, request *http.Request) {
 		proxyInference(response, request, client, baseURL, "/v1/games")
