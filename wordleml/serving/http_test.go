@@ -56,6 +56,12 @@ func TestHandlerServesSolutionsAndGame(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	health := httptest.NewRecorder()
+	handler.ServeHTTP(health, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	if health.Code != http.StatusOK || strings.Contains(health.Body.String(), `"runtime"`) || !strings.Contains(health.Body.String(), `"stage":""`) {
+		t.Fatalf("legacy health response = (%d, %s)", health.Code, health.Body.String())
+	}
+
 	solutions := httptest.NewRecorder()
 	handler.ServeHTTP(solutions, httptest.NewRequest(http.MethodGet, "/v1/solutions", nil))
 	if solutions.Code != http.StatusOK || !strings.Contains(solutions.Body.String(), `"VODKA"`) {

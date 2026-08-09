@@ -13,6 +13,7 @@ import (
 
 	"github.com/gomlx/compute"
 	"github.com/sam-bee/wordle-ml_machine-learning/gameeval"
+	"github.com/sam-bee/wordle-ml_machine-learning/inferenceapi"
 	"github.com/sam-bee/wordle-ml_machine-learning/policy"
 	"github.com/sam-bee/wordle-ml_machine-learning/proofeval"
 	"github.com/sam-bee/wordle-ml_machine-learning/proofgames"
@@ -25,7 +26,7 @@ import (
 
 // ErrInvalidSolution means a request did not name one of the fixed validation
 // solutions. The final-test split deliberately remains unavailable.
-var ErrInvalidSolution = errors.New("solution is not an allowed validation word")
+var ErrInvalidSolution = inferenceapi.ErrInvalidSolution
 
 // Options identifies one self-contained training run to serve.
 type Options struct {

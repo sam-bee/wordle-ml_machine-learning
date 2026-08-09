@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Watch a trained Wordle policy play through hand-written CUDA inference">
+    <title>Wordle ML · CUDA policy</title>
+    <link rel="stylesheet" href="/style.css">
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <main class="page-shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Go · cgo · CUDA</p>
+          <h1>Watch the policy play Wordle.</h1>
+          <p class="lede">
+            Go owns the Wordle game. A hand-written CUDA forward pass returns
+            raw logits for every possible guess, then Go applies the legal
+            action mask and plays the complete game.
+          </p>
+        </div>
+        <div class="runtime-card" aria-live="polite">
+          <span id="backend-identity" class="backend-identity">Inference backend: hand-written CUDA via cgo</span>
+          <span class="status-line"><i id="status-dot" class="status-dot loading"></i><span id="runtime-status">Connecting to CUDA inference…</span></span>
+          <span id="model-identity" class="model-identity">Waiting for model identity</span>
+          <span id="device-identity" class="device-identity">Waiting for GPU details</span>
+        </div>
+      </header>
+
+      <section class="play-panel" aria-labelledby="play-heading">
+        <div class="controls">
+          <div>
+            <p class="section-label">Validation game</p>
+            <h2 id="play-heading">Pick the hidden solution</h2>
+          </div>
+          <form id="game-form">
+            <div class="form-row">
+              <div class="form-field model-field">
+                <label for="model">Loaded model</label>
+                <select id="model" name="model" disabled>
+                  <option>Loading exported model…</option>
+                </select>
+              </div>
+              <div class="form-field solution-field">
+                <label for="solution">Solution</label>
+                <select id="solution" name="solution" disabled>
+                  <option>Loading validation words…</option>
+                </select>
+              </div>
+              <button id="play-button" type="submit" disabled>Run inference</button>
+            </div>
+          </form>
+        </div>
+
+        <div id="message" class="message" role="status" aria-live="polite">The CUDA model is warming up.</div>
+        <div id="game-result" class="game-result" hidden>
+          <div class="game-heading">
+            <div>
+              <p class="section-label">Live replay</p>
+              <h2 id="game-title">Game</h2>
+            </div>
+            <span id="game-summary" class="game-summary"></span>
+          </div>
+          <div id="board" class="board" aria-label="Wordle game turns"></div>
+        </div>
+      </section>
+
+      <footer>
+        The endpoint accepts the fixed validation solutions only. The sealed
+        final-test split is not available to this interface.
+      </footer>
+    </main>
+  </body>
+</html>

@@ -91,3 +91,28 @@ services:
       retries: 12
       start_period: 30s
     restart: unless-stopped
+
+  # Built by `make cuda-cgo-build` and started by `make cuda-cgo-demo`.
+  # The common definition gives this one process the single approved GPU and
+  # bind-mounts the exported artifact selected below.
+  cudaweb:
+    <<: *wordleml-common
+    command:
+      - /workspace/bin/cudaweb
+      - -model-dir=${CUDA_CGO_MODEL_DIR:-/workspace/runs/seed-replication-20260809-132505Z/exports/cuda-f32-v1/best}
+      - -addr=:8083
+    environment:
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+      WORDLEML_DATA_DIR: /workspace/data
+      WORDLEML_MACHINE_LEARNING_REPO_DIR: /workspace
+      WORDLEML_SYNTHETIC_REPO_DIR: /dependencies/wordle-ml_synthetic-data-creation
+      WORDLEML_GAME_ENGINE_REPO_DIR: /dependencies/wordle-ml_game-engine
+    ports:
+      - "127.0.0.1:${CUDA_CGO_WEB_HOST_PORT:-8083}:8083"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8083/healthz"]
+      interval: 5s
+      timeout: 2s
+      retries: 12
+      start_period: 30s
+    restart: unless-stopped

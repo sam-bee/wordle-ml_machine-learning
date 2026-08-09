@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/sam-bee/wordle-ml_machine-learning/inferenceapi"
 	"github.com/sam-bee/wordle-ml_machine-learning/proofeval"
 	"github.com/sam-bee/wordle-ml_machine-learning/proofrun"
 	"github.com/sam-bee/wordle-ml_machine-learning/runstate"
@@ -16,7 +17,7 @@ import (
 
 // ErrModelNotFound means the requested run is not a completed, compatible
 // training run currently available beneath the configured runs directory.
-var ErrModelNotFound = errors.New("model is not available")
+var ErrModelNotFound = inferenceapi.ErrModelNotFound
 
 // ModelSummary describes one best checkpoint which can be selected without
 // first loading it onto the CUDA device.

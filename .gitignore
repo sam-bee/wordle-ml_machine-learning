@@ -5,3 +5,8 @@
 /wordleml/train
 /wordleml/evaluate
 /wordleml/report
+/build/
+/bin/
+/artifacts/cuda-cgo/nsight-systems/*.nsys-rep
+/artifacts/cuda-cgo/nsight-systems/*.sqlite
+/artifacts/cuda-cgo/nsight-compute/*.ncu-rep
