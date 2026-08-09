@@ -1,7 +1,7 @@
 .DEFAULT_GOAL := help
 
 .PHONY: help configure docker-build build report test tidy format gpu-check smoke shell \
-	monitoring web web-logs tensorboard tensorboard-logs logs down
+	monitoring inference inference-logs web web-logs tensorboard tensorboard-logs logs down
 
 CUDA_FLAGS := -std=c++17 -arch=sm_120 -Xcompiler=-Wall,-Wextra
 CUDA_SMOKE_BINARY := /tmp/wordleml-cuda-smoke
@@ -14,7 +14,8 @@ help:
 	@echo "  make report        Show the command that verifies report rows and TensorBoard evidence, then writes Markdown"
 	@echo "  make test          Run both Go test suites"
 	@echo "  make smoke         Verify one approved RTX 5070 Ti/5050, sm_120 CUDA, and GoMLX/XLA"
-	@echo "  make monitoring    Start the splash page and TensorBoard"
+	@echo "  make inference     Start the warm CUDA inference API"
+	@echo "  make monitoring    Start the gameplay visualiser and TensorBoard"
 	@echo "  make shell         Open a shell in the GoMLX/CUDA container"
 	@echo "  make down          Stop the project containers"
 
@@ -25,7 +26,7 @@ docker-build: .env
 
 build: docker-build
 	docker compose run --rm --no-deps wordleml bash -lc \
-		'go build -o /tmp/wordleml-smoke ./cmd/smoke && go build -o /tmp/wordleml-inspect ./cmd/inspect && go build -o /tmp/wordleml-train ./cmd/train && go build -o /tmp/wordleml-evaluate ./cmd/evaluate && go build -o /tmp/wordleml-report ./cmd/report && cd /workspace/web && go build -o /tmp/wordleml-web ./cmd/server'
+		'go build -o /tmp/wordleml-smoke ./cmd/smoke && go build -o /tmp/wordleml-inspect ./cmd/inspect && go build -o /tmp/wordleml-train ./cmd/train && go build -o /tmp/wordleml-evaluate ./cmd/evaluate && go build -o /tmp/wordleml-report ./cmd/report && go build -o /tmp/wordleml-serve ./cmd/serve && cd /workspace/web && go build -o /tmp/wordleml-web ./cmd/server'
 
 report: docker-build
 	@echo "Use: docker compose run --rm --no-deps wordleml go run ./cmd/report -overfit-run-id=<id> -mini-run-id=<id> -full-run-id=<id> -output=../docs/ml/initial-training-proof-report.md"
@@ -54,6 +55,12 @@ shell: docker-build
 
 monitoring: .env
 	docker compose up -d --build web tensorboard
+
+inference: .env
+	docker compose up -d --build inference
+
+inference-logs:
+	docker compose logs --follow inference
 
 web: .env
 	docker compose up -d --build web

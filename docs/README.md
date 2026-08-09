@@ -8,6 +8,7 @@ Current project documentation:
 - [`data/overview-of-wordlists.md`](data/overview-of-wordlists.md) documents the model vocabularies and their provenance.
 - [`ml/model-structure.md`](ml/model-structure.md) describes the GoMLX policy architecture and parameter count.
 - [`ml/board-state-encoding.md`](ml/board-state-encoding.md) describes the four precomputed tensors consumed by the model.
+- [`ml/inference-serving.md`](ml/inference-serving.md) describes the warm CUDA inference API and browser gameplay flow.
 - [`ml/supervised-training.md`](ml/supervised-training.md) describes the frozen teacher corpus, loss, metrics, and
   completed initial supervised-training proof, with a link to its report.
 - [`ml/initial-training-proof-report.md`](ml/initial-training-proof-report.md) is the generated evidence from the

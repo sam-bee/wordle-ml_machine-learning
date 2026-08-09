@@ -2,8 +2,8 @@
 
 Wordle ML is a Go and CUDA project preparing a GoMLX policy to play Wordle. It contains the frozen imitation corpus,
 shared state encoder and batcher, fixed supervised-training proof stages, independently reloadable checkpoint
-evaluation, a reproducible development stack, GPU smoke test, TensorBoard, and a placeholder web visualiser. The proof
-workflow completed its first fixed validation proof; see the
+evaluation, a reproducible development stack, GPU smoke test, TensorBoard, and a live checkpoint-backed web visualiser.
+The proof workflow completed its first fixed validation proof; see the
 [initial training proof report](docs/ml/initial-training-proof-report.md).
 
 The best full checkpoint reduced validation loss from 8.3005 to 3.1633 and
@@ -29,8 +29,13 @@ capability 12.0, compiles a CUDA kernel for `sm_120`, and executes a small GoMLX
 
 Once monitoring is running, open:
 
-- splash page: <http://127.0.0.1:8082>
+- live Wordle policy: <http://127.0.0.1:8082>
 - TensorBoard: <http://127.0.0.1:6007>
+
+The visualiser loads the best checkpoint from `WORDLEML_INFERENCE_RUN_ID`
+(`proof-full-20260808` by default), offers the fixed validation solutions, and
+animates a complete game returned by the internal CUDA inference API. The
+browser and web container never receive direct GPU access.
 
 Proof runs write scalar and histogram events under `runs/<run-id>/events`, which TensorBoard discovers beneath
 `runs/`. See

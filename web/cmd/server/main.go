@@ -14,13 +14,24 @@ func main() {
 	if addr == "" {
 		addr = ":8080"
 	}
+	inferenceURL := os.Getenv("INFERENCE_URL")
+	if inferenceURL == "" {
+		inferenceURL = "http://inference:8090"
+	}
+	handler, err := server.NewHandler(server.Config{InferenceURL: inferenceURL})
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	httpServer := &http.Server{
 		Addr:              addr,
-		Handler:           server.Handler(),
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      50 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 
-	log.Printf("Wordle ML splash page listening on %s", addr)
+	log.Printf("Wordle ML visualiser listening on %s", addr)
 	log.Fatal(httpServer.ListenAndServe())
 }

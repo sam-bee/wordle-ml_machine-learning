@@ -5,17 +5,19 @@ toolchains out of the host environment and gives demonstrations used in the talk
 
 ## Services
 
-The Compose project has three services:
+The Compose project has four services:
 
 - `wordleml` is the development image. It uses CUDA 13.1, Go 1.26.5, GoMLX 0.28.0, go-xla 0.3.0, and the CUDA 13 PJRT
   plugin. Source is bind-mounted at `/workspace` so container commands can edit and build it.
-- `web` is the placeholder visualiser. A multi-stage Docker build tests and compiles the Go server, including its
-  embedded HTML and CSS, and copies the resulting binary into a small runtime image.
+- `inference` loads one passed full-run best checkpoint, keeps its GoMLX session warm on the configured CUDA device,
+  and exposes an internal-only complete-game API on port 8090.
+- `web` serves the gameplay visualiser and proxies same-origin `/api` requests to `inference`. A multi-stage Docker
+  build tests and compiles the Go server and its embedded HTML, CSS, and JavaScript into a small runtime image.
 - `tensorboard` runs TensorBoard from the official TensorFlow 2.20 image and reads self-contained run event directories
-  below `runs/`. No GPU is passed to either monitoring service.
+  below `runs/`. No GPU is passed to `web` or `tensorboard`.
 
-`make monitoring` starts the web and TensorBoard services. They bind only to host loopback because neither has an
-authentication layer.
+`make monitoring` starts inference, web, and TensorBoard. Only web and TensorBoard bind host ports, both on loopback;
+the GPU API remains private to the Compose network.
 
 ## GPU isolation
 
@@ -49,9 +51,16 @@ make docker-build  # build the development and web images
 make build         # compile both Go modules in the development container
 make test          # test both Go modules in the development container
 make smoke         # run CUDA and GoMLX GPU smoke tests
-make monitoring    # start the splash page and TensorBoard
+make inference     # start the warm CUDA inference API
+make monitoring    # start the gameplay visualiser and TensorBoard
 make down          # stop this project's services
 ```
+
+`WORDLEML_INFERENCE_RUN_ID` in `.env` selects a passed full proof run. The
+default is `proof-full-20260808`. Once `make monitoring` reports the inference
+service healthy, open <http://127.0.0.1:8082> and select a validation solution.
+See [inference serving](ml/inference-serving.md) for the REST contract and the
+host/device execution split.
 
 `make tidy` and `make format` also execute the Go tools inside the development container. The generated files remain
 owned by the host UID and GID configured in `.env`.

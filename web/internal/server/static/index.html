@@ -3,32 +3,62 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="Wordle ML project visualisation">
-    <title>Wordle ML</title>
+    <meta name="description" content="Watch the trained Wordle ML policy play complete games on CUDA">
+    <title>Wordle ML · Live policy</title>
     <link rel="stylesheet" href="/style.css">
+    <script src="/app.js" defer></script>
   </head>
   <body>
     <main class="page-shell">
-      <section class="hero" aria-labelledby="page-title">
-        <p class="eyebrow">Go · GoMLX · CUDA</p>
-        <div class="wordmark" aria-hidden="true">
-          <span class="tile correct">W</span>
-          <span class="tile present">O</span>
-          <span class="tile absent">R</span>
-          <span class="tile correct">D</span>
-          <span class="tile present">L</span>
-          <span class="tile correct">E</span>
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Go · GoMLX · CUDA</p>
+          <h1>Watch the policy play Wordle.</h1>
+          <p class="lede">
+            Choose one of the fixed validation words. The Go host runs the
+            authoritative game while every policy decision executes on the GPU.
+          </p>
         </div>
-        <h1 id="page-title">Teaching a machine to play Wordle.</h1>
-        <p class="lede">
-          This will become the project visualiser. For now, the model is still
-          learning how to get started—and so is this page.
-        </p>
-        <div class="status-row" aria-label="Project status">
-          <span><i class="status-dot"></i>Infrastructure ready</span>
-          <span>Model coming next</span>
+        <div class="runtime-card" aria-live="polite">
+          <span class="status-line"><i id="status-dot" class="status-dot loading"></i><span id="runtime-status">Connecting to inference…</span></span>
+          <span id="model-identity" class="model-identity">Waiting for model identity</span>
+        </div>
+      </header>
+
+      <section class="play-panel" aria-labelledby="play-heading">
+        <div class="controls">
+          <div>
+            <p class="section-label">Validation game</p>
+            <h2 id="play-heading">Pick the hidden solution</h2>
+          </div>
+          <form id="game-form">
+            <label for="solution">Solution</label>
+            <div class="form-row">
+              <select id="solution" name="solution" disabled>
+                <option>Loading validation words…</option>
+              </select>
+              <button id="play-button" type="submit" disabled>Run inference</button>
+            </div>
+          </form>
+        </div>
+
+        <div id="message" class="message" role="status" aria-live="polite">The model is warming up.</div>
+        <div id="game-result" class="game-result" hidden>
+          <div class="game-heading">
+            <div>
+              <p class="section-label">Live replay</p>
+              <h2 id="game-title">Game</h2>
+            </div>
+            <span id="game-summary" class="game-summary"></span>
+          </div>
+          <div id="board" class="board" aria-label="Wordle game turns"></div>
         </div>
       </section>
+
+      <footer>
+        The endpoint accepts validation solutions only. The sealed final-test
+        split is not available to this interface.
+      </footer>
     </main>
   </body>
 </html>

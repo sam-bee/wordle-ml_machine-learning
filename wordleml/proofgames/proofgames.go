@@ -54,10 +54,21 @@ func Evaluate(ctx context.Context, vocab *vocabulary.Vocabulary, solutions []str
 // game evaluator. It returns only finite raw logits; legal/repeated-action
 // selection deliberately remains inside gameeval.
 func EvaluateSession(ctx context.Context, session *supervised.Session, vocab *vocabulary.Vocabulary, solutions []string) (Evaluation, error) {
-	if session == nil {
-		return Evaluation{}, errors.New("supervised session is required")
+	score, err := SessionScorer(session)
+	if err != nil {
+		return Evaluation{}, err
 	}
-	return Evaluate(ctx, vocab, solutions, func(_ context.Context, position Position) ([]float32, error) {
+	return Evaluate(ctx, vocab, solutions, score)
+}
+
+// SessionScorer adapts one restored supervised session to the authoritative
+// game evaluator. It performs no legality filtering: gameeval applies the
+// availability mask after receiving these finite raw logits.
+func SessionScorer(session *supervised.Session) (ScoreFunc, error) {
+	if session == nil {
+		return nil, errors.New("supervised session is required")
+	}
+	return func(_ context.Context, position Position) ([]float32, error) {
 		rawTensor, maskedTensor, betaTensor, err := session.PredictDiagnostics(
 			[][]float32{position.Inputs.CandidateMask}, [][]float32{position.Inputs.CandidateStats}, []int32{position.Inputs.Turn},
 			[][]float32{position.Inputs.RemainingActionMask}, [][]float32{position.AvailableActionMask},
@@ -76,7 +87,7 @@ func EvaluateSession(ctx context.Context, session *supervised.Session, vocab *vo
 			}
 		}
 		return raw, nil
-	})
+	}, nil
 }
 
 // EvaluateInitialGames10 runs the fixed first ten validation games through an

@@ -122,7 +122,7 @@ func Run(ctx context.Context, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("open run: %w", err)
 	}
-	config, err := readConfig(layout)
+	config, err := ReadConfig(layout)
 	if err != nil {
 		return Result{}, err
 	}
@@ -387,7 +387,8 @@ func validateCombination(stage proofrun.Stage, checkpoint Checkpoint, mode Mode)
 	return fmt.Errorf("evaluation mode %q is not allowed for stage %q checkpoint %q", mode, stage, checkpoint)
 }
 
-func readConfig(layout runstate.Layout) (proofrun.Config, error) {
+// ReadConfig reads and validates one run's immutable fixed proof configuration.
+func ReadConfig(layout runstate.Layout) (proofrun.Config, error) {
 	contents, err := os.ReadFile(layout.ConfigPath)
 	if err != nil {
 		return proofrun.Config{}, fmt.Errorf("read run config: %w", err)

@@ -104,8 +104,13 @@ gradually and keep the Wordle problem visible throughout, rather than turning in
   the fixed validation games versus 4/100 at initialization, reducing mean
   guesses from 5.86 to 3.65. Present this as a bounded proof result, not a
   generalization claim: validation guides choices and final test stays sealed.
+- For the live demo, select a validation solution in the web application. Its
+  Go server proxies one same-origin request to the internal inference service;
+  the Go host advances the authoritative game and encodes each state, while up
+  to six policy forward passes execute through GoMLX on CUDA. The browser then
+  animates the returned trajectory without receiving GPU access.
 
 ## Later structure
 
-[To be expanded after the first experiment: baseline, learning curves, Go/CUDA boundary, failures and lessons, live
-visualisation, and conclusion.]
+[To be expanded after the first experiment: baseline, learning curves, Go/CUDA boundary, failures and lessons, and
+conclusion.]
