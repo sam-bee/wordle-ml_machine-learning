@@ -185,8 +185,13 @@ gradually and keep the Wordle problem visible throughout, rather than turning in
   lives in a separate PPO directory with actor/critic and actor-only exports;
   only a passed candidate becomes accepted. If the initial seed looks
   successful, repeat the bounded pilot from the original actor with a second
-  seed before making that claim. Do not state a PPO outcome in the talk until
-  the separate experiment report exists.
+  seed before making that claim.
+- The honest pilot result is `inconclusive`. Both seeds held the supervised
+  solve count at 198/200 and nudged failure-counted mean guesses from 3.620 to
+  3.615 and 3.610, but their paired 95% bootstrap intervals crossed zero. Both
+  candidates passed the rollback gates and have actor-only exports, yet PPO
+  did not distinguish itself convincingly from the supervised actor. The
+  supervised checkpoint remains the deployment baseline.
 
 ## Later structure
 

@@ -12,8 +12,9 @@ Current project documentation:
 - [`ml/supervised-training.md`](ml/supervised-training.md) describes the frozen teacher corpus, loss, metrics, and
   completed proof/production evidence plus the fixed independent-seed replication workflow.
 - [`ml/ppo-implementation.md`](ml/ppo-implementation.md) describes the optional, bounded PPO route, its isolated
-  critic/checkpoint design, protected development split, and promotion protocol; its separate experiment report records
-  the pilot outcome.
+  critic/checkpoint design, protected development split, and promotion protocol.
+- [`ml/ppo-pilot-report.md`](ml/ppo-pilot-report.md) records both bounded PPO seeds, checkpoint acceptance evidence,
+  and the final inconclusive comparison with the supervised actor.
 - [`ml/initial-training-proof-report.md`](ml/initial-training-proof-report.md) is the generated evidence from the
   completed fixed validation proof.
 - [`ml/production-training-report.md`](ml/production-training-report.md) is the generated validation-only comparison
