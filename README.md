@@ -126,6 +126,14 @@ It compares against immutable `production-20260809-005026Z` validation
 artifacts; it neither overwrites the production report nor opens the final
 test.
 
+The completed replication is `seed-replication-20260809-132505Z`. Its best
+checkpoint was update 2,600: validation loss was 3.1842 versus the original's
+lower 3.1341, while validation games were 98/100 with mean 3.66 guesses versus
+97/100 and 3.68. See the generated
+[`docs/ml/seed-replication-report.md`](docs/ml/seed-replication-report.md) for
+the paired state and all-100-game comparison. This is a two-seed robustness
+check, not a comprehensive statistical result or a selected-model change.
+
 The completed first run, `production-20260809-005026Z`, selected update 2,200:
 validation loss improved from the retained proof's 3.1633 to 3.1341, while
 both checkpoints solved 97/100 validation games and mean guesses changed from

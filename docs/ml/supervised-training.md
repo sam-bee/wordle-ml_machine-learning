@@ -157,9 +157,9 @@ checkpoints solved 97/100 validation games, while mean guesses changed from
 game solved fraction and is not a generalization claim. No final-test examples
 were loaded or evaluated.
 
-## Fixed independent-seed replication
+## Completed independent-seed replication
 
-One predeclared robustness replication uses the separate fixed
+The one predeclared robustness replication used the separate fixed
 `seed-replication` identity. Its configuration is identical to the completed
 production run after normalising only the stage identity and seed: the seed is
 `20260809`, while the architecture, encoder, frozen train/validation data,
@@ -168,28 +168,34 @@ learning rate, clipping, 10,000-update target, telemetry, validation,
 checkpoint, safety, provenance, and resume contracts are unchanged. There is
 no general seed flag or tuning surface.
 
-After the normal preflight has passed and the implementation is committed and
-pushed, launch it with a fresh timestamped ID that begins
+The reproduction command requires a fresh timestamped ID that begins
 `seed-replication-`:
 
 ```console
 docker compose run --rm --no-deps wordleml go run ./cmd/production -run-id=seed-replication-<timestamp>Z -seed-replication-20260809
 ```
 
-The same command and ID resume the job and validate the immutable seed and
-complete configuration before loading data or the model. After successful
-training only, the chain independently reloads the replication best
-checkpoint, reproduces its validation metrics, plays all 100 fixed validation
-games, and computes paired teacher-top-1 choices against
-`production-20260809-005026Z`. It atomically writes the new comparison to
-`docs/ml/seed-replication-report.md`; it refuses the existing production report
-path. The report includes paired per-game outcomes and does not change serving
-or selected-model documentation.
+The completed `seed-replication-20260809-132505Z` run reached all 10,000
+updates with finite loss, gradients, and parameters. Independent reload
+selected update 2,600 and reproduced validation loss 3.1842 within tolerance;
+the original seed-20260808 run remains lower at 3.1341 under the predeclared
+loss-only rule. The replication solved 98/100 validation games with mean 3.66
+guesses, versus 97/100 and 3.68 for the original. HIPPY and MAMMY failed under
+both, while UTTER failed only under the original.
+
+The generated [seed replication report](seed-replication-report.md) retains
+all 100 paired games and counts the 2,500 validation states as 1,192 both,
+83 original-only, 106 replication-only, and 1,119 neither teacher-top-1
+selections. The same command and ID validate the immutable seed and complete
+configuration on resume. The report path is separate, the existing production
+report was not overwritten, and serving/selected-model documentation was not
+changed.
 
 This is a minimal independent-initialisation robustness check across two
-seeds, not a comprehensive statistical study. The final-test split remains
-sealed and is not available to this training, pairing, evaluation, or report
-path.
+seeds, not a comprehensive statistical study. Replication metadata explicitly
+records an unopened final test and contains no final-test artifact; the sealed
+loader did not open the final-test wordlist or WDIT during training, pairing,
+evaluation, or reporting.
 
 ## Completed initial proof
 

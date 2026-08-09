@@ -15,6 +15,8 @@ Current project documentation:
   completed fixed validation proof.
 - [`ml/production-training-report.md`](ml/production-training-report.md) is the generated validation-only comparison
   from the completed first fixed production run.
+- [`ml/seed-replication-report.md`](ml/seed-replication-report.md) is the generated paired validation comparison from
+  the completed fixed seed-20260809 replication.
 - [`project-plan/next-steps.md`](project-plan/next-steps.md) records the completed fixed production continuation and
   subsequent review boundary;
   [`project-plan/codex-initial-training-proof-plan.md`](project-plan/codex-initial-training-proof-plan.md) records

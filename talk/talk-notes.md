@@ -127,14 +127,19 @@ gradually and keep the Wordle problem visible throughout, rather than turning in
   is a useful lesson: a small validation metric improvement did not improve
   this gameplay success rate. Keep the claim validation-only and the final
   test sealed.
-- Follow that result with exactly one predeclared seed-20260809 replication.
-  It changes only initialization/sampling seed and run identity; the model,
+- The result was followed by exactly one predeclared seed-20260809 replication.
+  It changed only initialization/sampling seed and run identity; the model,
   frozen data, objective, optimiser, batch size, learning rate, clipping,
   10,000-update budget, telemetry, checkpointing, and validation protocol stay
   fixed. Frame it as a minimal independent-initialisation robustness check,
-  not tuning and not a two-seed statistical study. Its separate report will
-  pair all 2,500 teacher-top-1 decisions and all 100 validation games while
-  leaving the selected-model story and final test untouched.
+  not tuning and not a two-seed statistical study. The
+  [replication report](../docs/ml/seed-replication-report.md) keeps the mixed
+  result honest: the original has lower best validation loss (3.1341 versus
+  3.1842), while the replication solved 98/100 rather than 97/100 and lowered
+  mean guesses from 3.68 to 3.66. HIPPY and MAMMY failed under both; UTTER
+  failed only under the original. Across 2,500 validation states, both selected
+  teacher top-1 on 1,192, original-only on 83, replication-only on 106, and
+  neither on 1,119. The final test and selected-model story remain untouched.
 - For the live demo, use the web application's run picker to contrast the
   retained proof and production best checkpoints. Changing the selection
   restores and warms that checkpoint on CUDA before it becomes active; the

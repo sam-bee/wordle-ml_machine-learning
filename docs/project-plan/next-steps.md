@@ -27,16 +27,21 @@ that checkpoint with `proof-full-20260808`. Production validation loss was
 3.1341 versus 3.1633 for the proof best; both solved 97/100 validation games,
 with mean guesses 3.68 versus 3.65.
 
-## Approved one-seed robustness replication
+## Completed one-seed robustness replication
 
-One additional validation-only experiment is approved: a fresh 10,000-update
-production-style run with seed 20260809. The original seed-20260808 production
-run remains immutable. Every other training, model, data, sampling, telemetry,
-checkpoint, safety, and evaluation choice stays fixed; this is an
-independent-initialisation robustness check, not tuning. A successful chain
-will compare the two production seeds in the separate
-`docs/ml/seed-replication-report.md`, including paired validation-state and
-per-game results, without changing selected-model documentation.
+The one additional validation-only experiment completed as
+`seed-replication-20260809-132505Z`: a fresh 10,000-update production-style run
+with seed 20260809. The original seed-20260808 production run remains
+immutable. Every other training, model, data, sampling, telemetry, checkpoint,
+safety, and evaluation choice stayed fixed; this was an
+independent-initialisation robustness check, not tuning. The generated
+[seed replication report](../ml/seed-replication-report.md) compares all paired
+validation states and games without changing selected-model documentation.
+
+The original has the lower best validation loss, 3.1341 versus 3.1842, under
+the predeclared rule. The replication solved 98/100 validation games versus
+97/100 and had mean guesses 3.66 versus 3.68. These mixed validation outcomes
+do not establish a generally better model.
 
 Following this one replication, keep any further experiment bounded and
 validation-only until another plan is approved.

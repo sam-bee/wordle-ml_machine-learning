@@ -179,6 +179,13 @@ report, and it adds an immutable
 generation. Resume requires the same mode and rejects a different seed or
 configuration. No final-test mode is exposed.
 
+The first such run completed as `seed-replication-20260809-132505Z`; its
+generated comparison is the
+[seed replication report](ml/seed-replication-report.md). TensorBoard contains
+1,000 training scalar steps (10..10,000), 101 validation steps (0..10,000),
+and the complete canonical histogram cadence. Replication metadata records the
+unopened final-test boundary without a test artifact.
+
 The recorded train/validation state-overlap audit is not solution-split
 leakage: solution IDs remain disjoint, while 190 of 2,445 unique validation
 encoded states also occur in training with agreeing teacher labels.
