@@ -27,10 +27,22 @@ that checkpoint with `proof-full-20260808`. Production validation loss was
 3.1341 versus 3.1633 for the proof best; both solved 97/100 validation games,
 with mean guesses 3.68 versus 3.65.
 
-Following this production report, keep any further experiment bounded and
-validation-only until a new plan is approved.
+## Approved one-seed robustness replication
+
+One additional validation-only experiment is approved: a fresh 10,000-update
+production-style run with seed 20260809. The original seed-20260808 production
+run remains immutable. Every other training, model, data, sampling, telemetry,
+checkpoint, safety, and evaluation choice stays fixed; this is an
+independent-initialisation robustness check, not tuning. A successful chain
+will compare the two production seeds in the separate
+`docs/ml/seed-replication-report.md`, including paired validation-state and
+per-game results, without changing selected-model documentation.
+
+Following this one replication, keep any further experiment bounded and
+validation-only until another plan is approved.
 
 The 100-solution final-test split remains sealed until model and training
-decisions are finished. Neither the completed proof nor the production run
-establishes broader generalization. Gameplay, reinforcement learning, and a
-custom CUDA model are not part of the next decision.
+decisions are finished. Neither the completed proof, the production run, nor
+two production seeds establish broader generalization. Gameplay,
+reinforcement learning, and a custom CUDA model are not part of the next
+decision.

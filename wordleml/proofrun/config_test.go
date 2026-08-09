@@ -61,6 +61,44 @@ func TestProductionConfigIsExactlyFixed(t *testing.T) {
 	}
 }
 
+func TestSeedReplicationConfigDiffersOnlyByRecordedIdentityAndSeed(t *testing.T) {
+	production, err := ConfigFor(Production)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replication, err := ConfigFor(SeedReplication)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replication.Stage != SeedReplication || replication.Seed != SeedReplicationSeed {
+		t.Fatalf("seed replication identity = %#v", replication)
+	}
+	replication.Stage = Production
+	replication.Seed = Seed
+	if replication != production {
+		t.Fatalf("seed replication changes more than stage/seed:\n got %#v\nwant %#v", replication, production)
+	}
+	if !IsProductionStyle(Production) || !IsProductionStyle(SeedReplication) || IsProductionStyle(Full) {
+		t.Fatal("production-style stage classification is incorrect")
+	}
+	layout, err := runstate.Create(t.TempDir(), "seed-replication-resume")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := ConfigFor(SeedReplication)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteOrValidateConfig(layout, stored, false); err != nil {
+		t.Fatal(err)
+	}
+	changedSeed := stored
+	changedSeed.Seed = Seed
+	if err := WriteOrValidateConfig(layout, changedSeed, true); err == nil {
+		t.Fatal("seed-replication resume accepted a different seed")
+	}
+}
+
 func TestProofStageConfigurationsRemainExactlyUnchanged(t *testing.T) {
 	want := map[Stage]Config{
 		Overfit: {Stage: Overfit, BatchSize: 128, LearningRate: 1e-3, TargetUpdates: 400, ValidationEvery: 100, CheckpointEvery: 100, ScalarEvery: 10, Seed: Seed, Precision: "float32", Objective: "masked_sparse_cross_entropy_teacher_top1", Optimizer: "Adam", LearningRateMode: "constant", WeightDecay: 0, GradientClipNorm: 5},
@@ -131,6 +169,10 @@ func TestStopAtAndImmutableConfig(t *testing.T) {
 	production, _ := ConfigFor(Production)
 	if err := ValidateStopAt(production, 500); err == nil {
 		t.Error("ValidateStopAt accepted production stop")
+	}
+	replication, _ := ConfigFor(SeedReplication)
+	if err := ValidateStopAt(replication, 500); err == nil {
+		t.Error("ValidateStopAt accepted seed-replication stop")
 	}
 	if err := validateStopAtForRun(mini, true, 500); err == nil {
 		t.Error("validateStopAtForRun accepted repeated mini stop")

@@ -114,6 +114,18 @@ best checkpoint and plays all 100 validation games. It writes the separate
 validation-only comparison report to
 [`docs/ml/production-training-report.md`](docs/ml/production-training-report.md).
 
+The one approved independent-seed robustness replication has no tunable seed
+surface. It fixes seed 20260809, otherwise reuses the complete production
+configuration, and writes a different report only after successful training:
+
+```console
+docker compose run --rm --no-deps wordleml go run ./cmd/production -run-id=seed-replication-<timestamp>Z -seed-replication-20260809
+```
+
+It compares against immutable `production-20260809-005026Z` validation
+artifacts; it neither overwrites the production report nor opens the final
+test.
+
 The completed first run, `production-20260809-005026Z`, selected update 2,200:
 validation loss improved from the retained proof's 3.1633 to 3.1341, while
 both checkpoints solved 97/100 validation games and mean guesses changed from

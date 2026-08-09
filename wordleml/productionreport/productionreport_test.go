@@ -116,10 +116,14 @@ func createFixtureRun(t *testing.T, runsDir, runID, stage string, updates int64,
 	if err != nil {
 		t.Fatal(err)
 	}
+	seed := int64(20260808)
+	if stage == "seed-replication" {
+		seed = 20260809
+	}
 	config := fixedConfig{
 		Stage: stage, BatchSize: 256, LearningRate: 3e-4, TargetUpdates: updates,
 		ValidationEvery: validationEvery, CheckpointEvery: validationEvery, ScalarEvery: scalarEvery,
-		Seed: 20260808, Precision: "float32", Objective: "masked_sparse_cross_entropy_teacher_top1",
+		Seed: seed, Precision: "float32", Objective: "masked_sparse_cross_entropy_teacher_top1",
 		Optimizer: "Adam", LearningRateMode: "constant", WeightDecay: 0, GradientClipNorm: 5,
 	}
 	configBytes, err := json.Marshal(config)
@@ -127,7 +131,7 @@ func createFixtureRun(t *testing.T, runsDir, runID, stage string, updates int64,
 		t.Fatal(err)
 	}
 	writeJSON(t, layout.ConfigPath, config)
-	metadata := fixtureMetadata(t, configBytes)
+	metadata := fixtureMetadata(t, configBytes, seed)
 	writeJSON(t, layout.MetadataPath, metadata)
 	for _, dir := range []string{layout.InitialCheckpointDir, layout.LatestCheckpointDir, layout.BestCheckpointDir} {
 		writeFile(t, filepath.Join(dir, "checkpoint.bin"), []byte("checkpoint"))
@@ -152,7 +156,7 @@ func createFixtureRun(t *testing.T, runsDir, runID, stage string, updates int64,
 		InitialValidationDetails: snapshots[0], FinalValidationDetails: snapshots[len(snapshots)-1], BestValidationDetails: snapshots[len(snapshots)-1],
 		ValidationSnapshots: snapshots, Evaluations: make(map[string]json.RawMessage),
 	}
-	if stage == "production" {
+	if stage == "production" || stage == "seed-replication" {
 		final.ProductionSafety = &productionSafety{LossFinite: true, GradientsFinite: true, ParametersFinite: true, UpdatesChecked: updates}
 	}
 	games := fixtureGames(solved)
@@ -167,7 +171,7 @@ func createFixtureRun(t *testing.T, runsDir, runID, stage string, updates int64,
 	}
 	final.Evaluations["best-games100"] = encodedEvaluation
 	writeJSON(t, layout.FinalMetricsPath, final)
-	state := runstate.State{GlobalUpdate: updates, ShuffleSeed: 20260808, BestValidation: &runstate.BestValidation{Value: best.Loss, Update: updates}}
+	state := runstate.State{GlobalUpdate: updates, ShuffleSeed: seed, BestValidation: &runstate.BestValidation{Value: best.Loss, Update: updates}}
 	if err := layout.WriteStateMirror(state); err != nil {
 		t.Fatal(err)
 	}
@@ -190,7 +194,7 @@ func replaceEvaluation(t *testing.T, run fixtureRun) {
 	writeJSON(t, filepath.Join(run.layout.EvaluationsDir, "best-games100.json"), run.evaluation)
 }
 
-func fixtureMetadata(t *testing.T, config []byte) runmetadata.Manifest {
+func fixtureMetadata(t *testing.T, config []byte, seed int64) runmetadata.Manifest {
 	t.Helper()
 	hash := strings.Repeat("a", 64)
 	artifact := func(path string) runmetadata.Artifact { return runmetadata.Artifact{Path: path, SHA256: hash} }
@@ -215,7 +219,11 @@ func fixtureMetadata(t *testing.T, config []byte) runmetadata.Manifest {
 			GoMLXDetails: map[string]string{"backend_name": "xla"}, GPUDetails: map[string]string{"name": "approved GPU"},
 			CUDADetails: map[string]string{"version": "13"}, PJRTDetails: map[string]string{"backend_description": "xla cuda"},
 		},
-		Seed: 20260808, EffectiveConfig: config,
+		Seed: seed, EffectiveConfig: config,
+	}
+	if seed == 20260809 {
+		manifest.FinalTestSealed = true
+		manifest.Splits.Test = nil
 	}
 	if err := manifest.Validate(); err != nil {
 		t.Fatalf("fixture manifest: %v", err)

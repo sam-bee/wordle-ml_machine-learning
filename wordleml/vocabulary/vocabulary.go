@@ -56,6 +56,18 @@ type Vocabulary struct {
 // Load reads the five fixed vocabulary files from dataDir and validates their
 // dimensions, membership, and complete train/validation/test solution split.
 func Load(dataDir string) (*Vocabulary, error) {
+	return load(dataDir, true)
+}
+
+// LoadWithoutFinalTest reads only the action, all-solution, training, and
+// validation word lists. It is the sealed-test loader for predeclared
+// experiments that must not open the final-test word list even for hashing or
+// partition validation.
+func LoadWithoutFinalTest(dataDir string) (*Vocabulary, error) {
+	return load(dataDir, false)
+}
+
+func load(dataDir string, includeFinalTest bool) (*Vocabulary, error) {
 	actions, actionHash, err := readWords(filepath.Join(dataDir, actionSpaceFilename), NumActions)
 	if err != nil {
 		return nil, err
@@ -72,9 +84,13 @@ func Load(dataDir string) (*Vocabulary, error) {
 	if err != nil {
 		return nil, err
 	}
-	test, testHash, err := readWords(filepath.Join(dataDir, testFilename), NumTestSolutions)
-	if err != nil {
-		return nil, err
+	var test []string
+	var testHash string
+	if includeFinalTest {
+		test, testHash, err = readWords(filepath.Join(dataDir, testFilename), NumTestSolutions)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	actionIDByWord, err := indexWords("action space", actions)
@@ -94,7 +110,7 @@ func Load(dataDir string) (*Vocabulary, error) {
 		solutionActionID[solutionID] = actionID
 	}
 
-	if err := validateSplit(solutionIDByWord, training, validation, test); err != nil {
+	if err := validateSplit(solutionIDByWord, training, validation, test, includeFinalTest); err != nil {
 		return nil, err
 	}
 
@@ -223,7 +239,7 @@ func indexWords(name string, words []string) (map[string]int, error) {
 	return index, nil
 }
 
-func validateSplit(solutionIDByWord map[string]int, training, validation, test []string) error {
+func validateSplit(solutionIDByWord map[string]int, training, validation, test []string, requireComplete bool) error {
 	seen := make(map[string]string, NumSolutions)
 	for splitName, words := range map[string][]string{
 		"training": training, "validation": validation, "test": test,
@@ -238,8 +254,12 @@ func validateSplit(solutionIDByWord map[string]int, training, validation, test [
 			seen[word] = splitName
 		}
 	}
-	if len(seen) != NumSolutions {
-		return fmt.Errorf("solution split contains %d distinct solutions, want %d", len(seen), NumSolutions)
+	want := NumTrainingSolutions + NumValidationSolutions
+	if requireComplete {
+		want = NumSolutions
+	}
+	if len(seen) != want {
+		return fmt.Errorf("loaded solution splits contain %d distinct solutions, want %d", len(seen), want)
 	}
 	return nil
 }

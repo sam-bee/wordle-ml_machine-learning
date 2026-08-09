@@ -60,6 +60,25 @@ func TestParseConfigUsesDataAndRunsEnvironmentDefaults(t *testing.T) {
 	}
 }
 
+func TestParseConfigAllowsOnlyThePredeclaredSeedReplication(t *testing.T) {
+	got, err := parseConfig([]string{"-run-id=seed-replication-20260809-010203Z", "-seed-replication-20260809"}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.seedReplication || got.reportPath != defaultSeedReplicationReportPath {
+		t.Fatalf("seed replication defaults = %#v", got)
+	}
+	for _, args := range [][]string{
+		{"-run-id=production-1", "-seed-replication-20260809"},
+		{"-run-id=seed-replication-1", "-seed=20260809"},
+		{"-run-id=seed-replication-1", "-seed-replication-20260809", "-report=../docs/ml/production-training-report.md"},
+	} {
+		if _, err := parseConfig(args, &bytes.Buffer{}); err == nil {
+			t.Fatalf("parseConfig(%q) unexpectedly succeeded", args)
+		}
+	}
+}
+
 func TestExecuteChainsFixedProductionWorkAndPublishesCompletedStatus(t *testing.T) {
 	runs := t.TempDir()
 	configuration := config{dataDir: "/frozen", runsDir: runs, runID: "production-20260809-010203", reportPath: "/reports/production.md"}
@@ -105,6 +124,78 @@ func TestExecuteChainsFixedProductionWorkAndPublishesCompletedStatus(t *testing.
 		if !strings.Contains(output.String(), phase) {
 			t.Errorf("progress output %q does not contain %q", output.String(), phase)
 		}
+	}
+}
+
+func TestExecuteChainsFixedSeedReplicationAndPairedReport(t *testing.T) {
+	runs := t.TempDir()
+	configuration := config{
+		dataDir: "/frozen", runsDir: runs, runID: "seed-replication-20260809-010203Z",
+		reportPath: "/reports/seed-replication.md", seedReplication: true,
+	}
+	var gotTrain proofrun.Options
+	var gotComparison proofeval.PairedTop1Options
+	var gotReport productionreport.SeedReplicationOptions
+	statusPath := filepath.Join(runs, configuration.runID+".status.json")
+	err := execute(configuration, dependencies{
+		train: func(options proofrun.Options, _ io.Writer) (proofrun.Result, error) {
+			gotTrain = options
+			return proofrun.Result{}, nil
+		},
+		evaluate: func(context.Context, proofeval.Options) (proofeval.Result, error) {
+			return proofeval.Result{}, nil
+		},
+		compare: func(_ context.Context, options proofeval.PairedTop1Options) (proofeval.PairedTop1Comparison, error) {
+			assertRunningStatus(t, statusPath, "paired-validation")
+			gotComparison = options
+			return proofeval.PairedTop1Comparison{}, nil
+		},
+		replicationReport: func(options productionreport.SeedReplicationOptions) error {
+			assertRunningStatus(t, statusPath, "report")
+			gotReport = options
+			return nil
+		},
+		report: func(productionreport.Options) error {
+			t.Fatal("ordinary production report ran for seed replication")
+			return nil
+		},
+	}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotTrain.Stage != proofrun.SeedReplication || gotTrain.RunID != configuration.runID {
+		t.Fatalf("seed replication training options = %#v", gotTrain)
+	}
+	if gotComparison.OriginalRunID != defaultOriginalProductionRunID || gotComparison.ReplicationRunID != configuration.runID || gotComparison.DataDir != configuration.dataDir || gotComparison.RunsDir != configuration.runsDir {
+		t.Fatalf("paired comparison options = %#v", gotComparison)
+	}
+	if gotReport.OriginalRunID != defaultOriginalProductionRunID || gotReport.ReplicationRunID != configuration.runID || gotReport.OutputPath != configuration.reportPath {
+		t.Fatalf("seed replication report options = %#v", gotReport)
+	}
+	if got := readStatus(t, statusPath); got.Phase != "completed" || got.Outcome != "completed" {
+		t.Fatalf("completed status = %#v", got)
+	}
+}
+
+func TestExecuteSeedReplicationStopsBeforeReportOnPairedValidationFailure(t *testing.T) {
+	runs := t.TempDir()
+	configuration := config{dataDir: "/frozen", runsDir: runs, runID: "seed-replication-1", reportPath: "/reports/seed.md", seedReplication: true}
+	err := execute(configuration, dependencies{
+		train:    func(proofrun.Options, io.Writer) (proofrun.Result, error) { return proofrun.Result{}, nil },
+		evaluate: func(context.Context, proofeval.Options) (proofeval.Result, error) { return proofeval.Result{}, nil },
+		compare: func(context.Context, proofeval.PairedTop1Options) (proofeval.PairedTop1Comparison, error) {
+			return proofeval.PairedTop1Comparison{}, errors.New("paired comparison failed")
+		},
+		replicationReport: func(productionreport.SeedReplicationOptions) error {
+			t.Fatal("report ran after paired validation failure")
+			return nil
+		},
+	}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "paired comparison failed") {
+		t.Fatalf("execute error = %v", err)
+	}
+	if got := readStatus(t, filepath.Join(runs, configuration.runID+".status.json")); got.Phase != "paired-validation" || got.Outcome != "failed" {
+		t.Fatalf("failure status = %#v", got)
 	}
 }
 

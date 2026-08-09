@@ -163,6 +163,22 @@ then atomically creates the validation-only comparison at
 `docs/ml/production-training-report.md`. The final-test split is never opened;
 any failure stops the post-training chain with retained status and logs.
 
+The single approved seed replication reuses the same orchestration with a
+fixed, non-tunable seed-20260809 mode and a run ID that identifies the
+experiment:
+
+```console
+docker compose run --rm --no-deps wordleml go run ./cmd/production -run-id=seed-replication-<timestamp>Z -seed-replication-20260809
+```
+
+Use the same status, checkpoint, log, and TensorBoard paths shown above. The
+automatic post-training chain writes
+`docs/ml/seed-replication-report.md` instead of the immutable first-production
+report, and it adds an immutable
+`evaluations/best-paired-top1.json` validation-state artifact before report
+generation. Resume requires the same mode and rejects a different seed or
+configuration. No final-test mode is exposed.
+
 The recorded train/validation state-overlap audit is not solution-split
 leakage: solution IDs remain disjoint, while 190 of 2,445 unique validation
 encoded states also occur in training with agreeing teacher labels.

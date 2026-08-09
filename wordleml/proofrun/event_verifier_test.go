@@ -10,7 +10,7 @@ import (
 )
 
 func TestVerifyTensorBoardEventsForFixedStages(t *testing.T) {
-	for _, stage := range []Stage{Overfit, Mini, Full, Production} {
+	for _, stage := range []Stage{Overfit, Mini, Full, Production, SeedReplication} {
 		t.Run(string(stage), func(t *testing.T) {
 			eventsDir := t.TempDir()
 			config, err := ConfigFor(stage)
@@ -44,7 +44,7 @@ func TestVerifyTensorBoardEventsForFixedStages(t *testing.T) {
 			} else if proof.TrainingLossTrend != nil {
 				t.Errorf("%s loss trend = %+v, want no full-stage evidence", stage, proof.TrainingLossTrend)
 			}
-			if stage == Production {
+			if IsProductionStyle(stage) {
 				if got, want := proof.TrainingSteps, expectedSteps(10, 10, 10_000); !slices.Equal(got, want) {
 					t.Errorf("production training steps = %v, want exact 10..10,000 cadence", got)
 				}

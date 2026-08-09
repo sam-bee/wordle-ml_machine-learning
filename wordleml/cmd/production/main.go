@@ -21,15 +21,18 @@ import (
 )
 
 const (
-	defaultProofRunID = "proof-full-20260808"
-	defaultReportPath = "../docs/ml/production-training-report.md"
+	defaultProofRunID                = "proof-full-20260808"
+	defaultOriginalProductionRunID   = "production-20260809-005026Z"
+	defaultReportPath                = "../docs/ml/production-training-report.md"
+	defaultSeedReplicationReportPath = "../docs/ml/seed-replication-report.md"
 )
 
 type config struct {
-	dataDir    string
-	runsDir    string
-	runID      string
-	reportPath string
+	dataDir         string
+	runsDir         string
+	runID           string
+	reportPath      string
+	seedReplication bool
 }
 
 // status is deliberately separate from the self-contained run artifacts so
@@ -44,17 +47,24 @@ type status struct {
 }
 
 type dependencies struct {
-	train    func(proofrun.Options, io.Writer) (proofrun.Result, error)
-	evaluate func(context.Context, proofeval.Options) (proofeval.Result, error)
-	report   func(productionreport.Options) error
+	train             func(proofrun.Options, io.Writer) (proofrun.Result, error)
+	evaluate          func(context.Context, proofeval.Options) (proofeval.Result, error)
+	compare           func(context.Context, proofeval.PairedTop1Options) (proofeval.PairedTop1Comparison, error)
+	report            func(productionreport.Options) error
+	replicationReport func(productionreport.SeedReplicationOptions) error
 }
 
 func productionDependencies() dependencies {
 	return dependencies{
 		train:    proofrun.Run,
 		evaluate: proofeval.Run,
+		compare:  proofeval.CompareBestTeacherTop1,
 		report: func(options productionreport.Options) error {
 			_, err := productionreport.Write(options)
+			return err
+		},
+		replicationReport: func(options productionreport.SeedReplicationOptions) error {
+			_, err := productionreport.WriteSeedReplication(options)
 			return err
 		},
 	}
@@ -96,6 +106,7 @@ func parseConfig(args []string, stderr io.Writer) (config, error) {
 	flags.StringVar(&value.runsDir, "runs-dir", runsDir, "directory containing self-contained training runs")
 	flags.StringVar(&value.runID, "run-id", "", "required fresh timestamped production-run identifier")
 	flags.StringVar(&value.reportPath, "report", defaultReportPath, "output path for the production training report")
+	flags.BoolVar(&value.seedReplication, "seed-replication-20260809", false, "run the one fixed seed-20260809 production replication")
 	if err := flags.Parse(args); err != nil {
 		return value, err
 	}
@@ -114,11 +125,28 @@ func parseConfig(args []string, stderr io.Writer) (config, error) {
 	if strings.TrimSpace(value.reportPath) == "" {
 		return value, errors.New("-report is required")
 	}
+	if value.seedReplication {
+		reportExplicit := false
+		flags.Visit(func(current *flag.Flag) {
+			if current.Name == "report" {
+				reportExplicit = true
+			}
+		})
+		if !strings.HasPrefix(value.runID, "seed-replication-") {
+			return value, errors.New("seed-replication run ID must begin with seed-replication-")
+		}
+		if !reportExplicit {
+			value.reportPath = defaultSeedReplicationReportPath
+		}
+		if filepath.Base(value.reportPath) == filepath.Base(defaultReportPath) {
+			return value, errors.New("seed replication must not overwrite the production training report")
+		}
+	}
 	return value, nil
 }
 
 func execute(configuration config, deps dependencies, stdout io.Writer) error {
-	if err := validateDependencies(deps); err != nil {
+	if err := validateDependencies(configuration, deps); err != nil {
 		return err
 	}
 	statusPath := filepath.Join(configuration.runsDir, configuration.runID+".status.json")
@@ -128,11 +156,15 @@ func execute(configuration config, deps dependencies, stdout io.Writer) error {
 	if _, err := fmt.Fprintf(stdout, "production run %s: training\n", configuration.runID); err != nil {
 		return fail(statusPath, configuration.runID, "training", fmt.Errorf("write progress: %w", err))
 	}
+	stage := proofrun.Production
+	if configuration.seedReplication {
+		stage = proofrun.SeedReplication
+	}
 	if _, err := deps.train(proofrun.Options{
 		DataDir: configuration.dataDir,
 		RunsDir: configuration.runsDir,
 		RunID:   configuration.runID,
-		Stage:   proofrun.Production,
+		Stage:   stage,
 	}, stdout); err != nil {
 		return fail(statusPath, configuration.runID, "training", fmt.Errorf("run fixed production training: %w", err))
 	}
@@ -152,6 +184,20 @@ func execute(configuration config, deps dependencies, stdout io.Writer) error {
 	}); err != nil {
 		return fail(statusPath, configuration.runID, "evaluation", fmt.Errorf("evaluate best production checkpoint: %w", err))
 	}
+	if configuration.seedReplication {
+		if err := writeStatus(statusPath, status{RunID: configuration.runID, Phase: "paired-validation", Outcome: "running"}); err != nil {
+			return fail(statusPath, configuration.runID, "paired-validation", fmt.Errorf("publish paired validation status: %w", err))
+		}
+		if _, err := fmt.Fprintf(stdout, "production run %s: comparing paired validation states with %s\n", configuration.runID, defaultOriginalProductionRunID); err != nil {
+			return fail(statusPath, configuration.runID, "paired-validation", fmt.Errorf("write progress: %w", err))
+		}
+		if _, err := deps.compare(context.Background(), proofeval.PairedTop1Options{
+			DataDir: configuration.dataDir, RunsDir: configuration.runsDir,
+			OriginalRunID: defaultOriginalProductionRunID, ReplicationRunID: configuration.runID,
+		}); err != nil {
+			return fail(statusPath, configuration.runID, "paired-validation", fmt.Errorf("compare paired validation states: %w", err))
+		}
+	}
 
 	if err := writeStatus(statusPath, status{RunID: configuration.runID, Phase: "report", Outcome: "running"}); err != nil {
 		return fail(statusPath, configuration.runID, "report", fmt.Errorf("publish production report status: %w", err))
@@ -159,11 +205,16 @@ func execute(configuration config, deps dependencies, stdout io.Writer) error {
 	if _, err := fmt.Fprintf(stdout, "production run %s: writing comparison report\n", configuration.runID); err != nil {
 		return fail(statusPath, configuration.runID, "report", fmt.Errorf("write progress: %w", err))
 	}
-	if err := deps.report(productionreport.Options{
-		RunsDir:         configuration.runsDir,
-		ProductionRunID: configuration.runID,
-		ProofRunID:      defaultProofRunID,
-		OutputPath:      configuration.reportPath,
+	if configuration.seedReplication {
+		if err := deps.replicationReport(productionreport.SeedReplicationOptions{
+			RunsDir: configuration.runsDir, OriginalRunID: defaultOriginalProductionRunID,
+			ReplicationRunID: configuration.runID, OutputPath: configuration.reportPath,
+		}); err != nil {
+			return fail(statusPath, configuration.runID, "report", fmt.Errorf("write seed-replication comparison report: %w", err))
+		}
+	} else if err := deps.report(productionreport.Options{
+		RunsDir: configuration.runsDir, ProductionRunID: configuration.runID,
+		ProofRunID: defaultProofRunID, OutputPath: configuration.reportPath,
 	}); err != nil {
 		return fail(statusPath, configuration.runID, "report", fmt.Errorf("write production comparison report: %w", err))
 	}
@@ -176,8 +227,14 @@ func execute(configuration config, deps dependencies, stdout io.Writer) error {
 	return nil
 }
 
-func validateDependencies(deps dependencies) error {
-	if deps.train == nil || deps.evaluate == nil || deps.report == nil {
+func validateDependencies(configuration config, deps dependencies) error {
+	if deps.train == nil || deps.evaluate == nil {
+		return errors.New("production orchestration dependencies must not be nil")
+	}
+	if configuration.seedReplication && (deps.compare == nil || deps.replicationReport == nil) {
+		return errors.New("seed-replication orchestration dependencies must not be nil")
+	}
+	if !configuration.seedReplication && deps.report == nil {
 		return errors.New("production orchestration dependencies must not be nil")
 	}
 	return nil

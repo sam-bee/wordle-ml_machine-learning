@@ -167,7 +167,12 @@ func Run(options Options, stdout io.Writer) (Result, error) {
 		_, _ = fmt.Fprintf(logFile, format+"\n", args...)
 	}
 
-	vocab, err := vocabulary.Load(options.DataDir)
+	var vocab *vocabulary.Vocabulary
+	if config.Stage == SeedReplication {
+		vocab, err = vocabulary.LoadWithoutFinalTest(options.DataDir)
+	} else {
+		vocab, err = vocabulary.Load(options.DataDir)
+	}
 	if err != nil {
 		return Result{}, fmt.Errorf("load vocabulary: %w", err)
 	}
@@ -251,7 +256,7 @@ func Run(options Options, stdout io.Writer) (Result, error) {
 		if err := warmValidationShapes(session, validationData, opening); err != nil {
 			return Result{}, fmt.Errorf("warm restored inference before metadata validation: %w", err)
 		}
-		if config.Stage == Production {
+		if IsProductionStyle(config.Stage) {
 			if err := validateFiniteTrainableParameters(session.Store); err != nil {
 				return Result{}, fmt.Errorf("validate restored production parameters: %w", err)
 			}
@@ -274,7 +279,7 @@ func Run(options Options, stdout io.Writer) (Result, error) {
 			if err := validateManifestIdentity(layout, options.DataDir, config, trainData, session, backend); err != nil {
 				return Result{}, err
 			}
-			if config.Stage == Production {
+			if IsProductionStyle(config.Stage) {
 				if err := repairProductionCheckpointCopies(backend, layout, latest, session, state, config); err != nil {
 					return Result{}, err
 				}
@@ -302,7 +307,7 @@ func Run(options Options, stdout io.Writer) (Result, error) {
 	var resumeProof *ResumeProof
 	var telemetryProof *MiniTelemetryProof
 	var productionSafety *ProductionSafety
-	if config.Stage == Production {
+	if IsProductionStyle(config.Stage) {
 		productionSafety = &ProductionSafety{}
 	}
 	evaluations := make(map[string]json.RawMessage)
@@ -317,7 +322,7 @@ func Run(options Options, stdout io.Writer) (Result, error) {
 			if err := validateSamplerPeek(state, sampler); err != nil {
 				return Result{}, err
 			}
-			if config.Stage == Production {
+			if IsProductionStyle(config.Stage) {
 				if err := validateProductionSamplerResumeState(state, sampler, sourceData, opening, config); err != nil {
 					return Result{}, err
 				}
@@ -387,7 +392,7 @@ func Run(options Options, stdout io.Writer) (Result, error) {
 		if err := writeValidationTelemetry(events, 0, initialValidationDetails, samples, session); err != nil {
 			return Result{}, err
 		}
-		if config.Stage == Production {
+		if IsProductionStyle(config.Stage) {
 			if err := validateFiniteTrainableParameters(session.Store); err != nil {
 				return Result{}, fmt.Errorf("validate initial production parameters: %w", err)
 			}
@@ -442,9 +447,12 @@ func Run(options Options, stdout io.Writer) (Result, error) {
 		}
 		log("validation step=0 loss=%g top1=%g top5=%g top16=%g opening_guess=%s", initialValidation.Loss, initialValidation.Top1, initialValidation.Top5, initialValidation.Top16, initialValidationDetails.OpeningWord)
 	} else {
-		previous, recoveredCheckpointProgress, err := loadPriorResult(layout, state, config.Stage == Production)
+		previous, recoveredCheckpointProgress, err := loadPriorResult(layout, state, IsProductionStyle(config.Stage))
 		if err != nil {
 			return Result{}, err
+		}
+		if previous.Stage != config.Stage {
+			return Result{}, fmt.Errorf("prior result stage %q differs from immutable config stage %q", previous.Stage, config.Stage)
 		}
 		initialValidation, initialTraining, finalTraining, finalValidation = previous.InitialValidation, previous.InitialTraining, previous.FinalTraining, previous.FinalValidation
 		validationImprovements = previous.ValidationImprovements
@@ -467,7 +475,7 @@ func Run(options Options, stdout io.Writer) (Result, error) {
 		if bestValidation.Loss != state.BestValidation.Value {
 			return Result{}, fmt.Errorf("prior best validation loss %g differs from checkpoint state %g", bestValidation.Loss, state.BestValidation.Value)
 		}
-		if config.Stage == Production {
+		if IsProductionStyle(config.Stage) {
 			if err := validateProductionSafetyProgress(productionSafety, state.GlobalUpdate); err != nil {
 				return Result{}, fmt.Errorf("prior production safety evidence: %w", err)
 			}
@@ -557,7 +565,7 @@ func Run(options Options, stdout io.Writer) (Result, error) {
 		if err := validateTrainingDiagnostics(diagnostics); err != nil {
 			return Result{}, fmt.Errorf("training safety check at update %d: %w", step, err)
 		}
-		if config.Stage == Production {
+		if IsProductionStyle(config.Stage) {
 			if productionSafety == nil {
 				return Result{}, errors.New("production safety evidence was not initialized")
 			}
@@ -619,7 +627,7 @@ func Run(options Options, stdout io.Writer) (Result, error) {
 			cursor := sampler.Cursor()
 			state.DatasetEpoch, state.ShuffledCursor, state.NextRecordIDs = cursor.Epoch, cursor.Offset, sampler.Peek()
 		}
-		if config.Stage == Production {
+		if IsProductionStyle(config.Stage) {
 			checkpointProgress := progressResult(step)
 			if err := validatePriorValidationEvidence(checkpointProgress, validationData.Len()); err != nil {
 				return Result{}, fmt.Errorf("validate checkpoint progress at update %d: %w", step, err)
@@ -693,8 +701,8 @@ func Run(options Options, stdout io.Writer) (Result, error) {
 			gateErr = fmt.Errorf("full proof gate failed: training loss %g -> %g, validation initial=%+v best=%+v, improving validation checkpoints %d, improving major groups turns=%d/%v shortlist=%d/%v (minimum %d examples)", result.InitialTraining.Loss, result.FinalTraining.Loss, result.InitialValidation, result.BestValidation, result.ValidationImprovements, result.MajorGroupLearning.TurnCount, result.MajorGroupLearning.TurnGroups, result.MajorGroupLearning.ShortlistCount, result.MajorGroupLearning.ShortlistGroups, result.MajorGroupLearning.MinimumExamples)
 		}
 	}
-	if config.Stage == Production {
-		if _, err := VerifyTensorBoardEvents(layout.EventsDir, Production); err != nil {
+	if IsProductionStyle(config.Stage) {
+		if _, err := VerifyTensorBoardEvents(layout.EventsDir, config.Stage); err != nil {
 			gateErr = fmt.Errorf("verify complete production TensorBoard telemetry: %w", err)
 		} else {
 			result.Passed = productionRunPassed(config, result)
@@ -766,7 +774,7 @@ func initialState(session *supervised.Session, resumed bool, config Config) (sta
 }
 
 func isProductionBootstrap(config Config, err error) bool {
-	return config.Stage == Production && errors.Is(err, runstate.ErrStateNotFound)
+	return IsProductionStyle(config.Stage) && errors.Is(err, runstate.ErrStateNotFound)
 }
 
 func validateSamplerPeek(state runstate.State, sampler *imitationdata.TrainingSampler) error {
@@ -784,7 +792,7 @@ func validateSamplerPeek(state runstate.State, sampler *imitationdata.TrainingSa
 // not merely self-consistent with its stored peek: it must be the exact cursor
 // reached by GlobalUpdate batches from the fixed production sampler origin.
 func validateProductionSamplerResumeState(state runstate.State, sampler *imitationdata.TrainingSampler, source *imitationdata.Data, opening imitationdata.Example, config Config) error {
-	if config.Stage != Production {
+	if !IsProductionStyle(config.Stage) {
 		return errors.New("production sampler validation used for a non-production config")
 	}
 	reference, err := imitationdata.NewTrainingSampler(source, opening, config.BatchSize, config.Seed, imitationdata.Cursor{})
@@ -945,7 +953,7 @@ func fullGatePassed(result Result) bool {
 // safety only. It does not reuse the 2,000-update proof gate or impose a
 // performance threshold on the fixed 10,000-update production run.
 func productionRunPassed(config Config, result Result) bool {
-	if config.Stage != Production || result.Stage != Production || result.GlobalUpdate != config.TargetUpdates || config.TargetUpdates != 10000 || config.ValidationEvery <= 0 {
+	if !IsProductionStyle(config.Stage) || result.Stage != config.Stage || result.GlobalUpdate != config.TargetUpdates || config.TargetUpdates != 10000 || config.ValidationEvery <= 0 {
 		return false
 	}
 	if !result.InitialTraining.Finite() || !result.FinalTraining.Finite() || !result.InitialValidation.Finite() || !result.FinalValidation.Finite() || !result.BestValidation.Finite() {
@@ -1067,7 +1075,7 @@ func repairProductionCheckpointCopies(
 	latestState runstate.State,
 	config Config,
 ) error {
-	if config.Stage != Production {
+	if !IsProductionStyle(config.Stage) {
 		return errors.New("checkpoint-copy repair is only valid for production")
 	}
 	if err := ensureProductionInitialCheckpoint(backend, layout, latest, session, latestState, config); err != nil {
@@ -1580,8 +1588,8 @@ func loadPriorResult(layout runstate.Layout, state runstate.State, allowCheckpoi
 }
 
 func validateProductionProgressIdentity(result Result, state runstate.State) error {
-	if result.Stage != Production {
-		return fmt.Errorf("stage %q is not production", result.Stage)
+	if !IsProductionStyle(result.Stage) {
+		return fmt.Errorf("stage %q is not production-style", result.Stage)
 	}
 	if result.GlobalUpdate != state.GlobalUpdate {
 		return fmt.Errorf("progress update %d differs from checkpoint state update %d", result.GlobalUpdate, state.GlobalUpdate)
@@ -1646,12 +1654,17 @@ func collectManifest(dataDir string, config Config, trainData *imitationdata.Dat
 		return runmetadata.Manifest{}, fmt.Errorf("encode effective proof configuration: %w", err)
 	}
 	imitationDir := filepath.Join(dataDir, "imitation")
-	// The sealed test WDIT files are deliberately outside this manifest: even
-	// hashing them opens the teacher records.  The canonical test wordlist is
-	// retained below as a split identity only.
+	// The sealed test WDIT files are deliberately outside every manifest: even
+	// hashing them opens teacher records. SeedReplication also omits the test
+	// wordlist entirely and records that stricter boundary in metadata.
 	datasetFiles := make([]string, 0, 6)
 	for _, split := range []string{"mini", "train", "validation"} {
 		datasetFiles = append(datasetFiles, filepath.Join(imitationDir, "wordle-"+split+".bin"), filepath.Join(imitationDir, "wordle-"+split+".json"))
+	}
+	testSplit := []string{filepath.Join(dataDir, "wordlist-valid-solutions-test-100.csv")}
+	finalTestSealed := config.Stage == SeedReplication
+	if finalTestSealed {
+		testSplit = nil
 	}
 	manifest, err := runmetadata.Collect(runmetadata.CollectOptions{
 		RepositoryRoot:            mlRepository,
@@ -1665,10 +1678,10 @@ func collectManifest(dataDir string, config Config, trainData *imitationdata.Dat
 			filepath.Join(dataDir, "wordlist-action-space-4739.csv"),
 			filepath.Join(dataDir, "wordlist-valid-solutions-all-2309.csv"),
 		},
-		TrainingSplit:   []string{filepath.Join(dataDir, "wordlist-valid-solutions-train-2109.csv")},
-		ValidationSplit: []string{filepath.Join(dataDir, "wordlist-valid-solutions-validation-100.csv")},
-		// This hashes the sealed test split without loading its WDIT records.
-		TestSplit:           []string{filepath.Join(dataDir, "wordlist-valid-solutions-test-100.csv")},
+		TrainingSplit:       []string{filepath.Join(dataDir, "wordlist-valid-solutions-train-2109.csv")},
+		ValidationSplit:     []string{filepath.Join(dataDir, "wordlist-valid-solutions-validation-100.csv")},
+		TestSplit:           testSplit,
+		FinalTestSealed:     finalTestSealed,
 		ModelParameterCount: trainableParameterCount(session.Store),
 		Runtime:             runtimeMetadata,
 		Seed:                config.Seed,

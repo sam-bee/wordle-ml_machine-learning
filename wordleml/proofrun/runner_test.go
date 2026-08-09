@@ -36,32 +36,36 @@ func TestValidateFiniteTrainableParameters(t *testing.T) {
 }
 
 func TestProductionCompletionIsTenThousandUpdatesWithoutFullProofGate(t *testing.T) {
-	config, err := ConfigFor(Production)
-	if err != nil {
-		t.Fatal(err)
-	}
-	passing := productionResultForTest(config)
-	if !productionRunPassed(config, passing) {
-		t.Fatal("complete finite production result did not pass")
-	}
-	for name, mutate := range map[string]func(*Result){
-		"old full target": func(result *Result) { result.GlobalUpdate = 2000 },
-		"missing snapshot": func(result *Result) {
-			result.ValidationSnapshots = result.ValidationSnapshots[:len(result.ValidationSnapshots)-1]
-		},
-		"off cadence snapshot": func(result *Result) { result.ValidationSnapshots[1].Update++ },
-		"non-finite train":     func(result *Result) { result.FinalTraining.Loss = math.Inf(1) },
-		"best after target":    func(result *Result) { result.BestValidationStep = config.TargetUpdates + 1 },
-		"missing safety":       func(result *Result) { result.ProductionSafety = nil },
-		"partial safety":       func(result *Result) { result.ProductionSafety.UpdatesChecked-- },
-	} {
-		t.Run(name, func(t *testing.T) {
-			candidate := passing
-			candidate.ValidationSnapshots = append([]ValidationSnapshot(nil), passing.ValidationSnapshots...)
-			candidate.ProductionSafety = cloneProductionSafety(passing.ProductionSafety)
-			mutate(&candidate)
-			if productionRunPassed(config, candidate) {
-				t.Fatal("incomplete production result passed")
+	for _, stage := range []Stage{Production, SeedReplication} {
+		t.Run(string(stage), func(t *testing.T) {
+			config, err := ConfigFor(stage)
+			if err != nil {
+				t.Fatal(err)
+			}
+			passing := productionResultForTest(config)
+			if !productionRunPassed(config, passing) {
+				t.Fatal("complete finite production-style result did not pass")
+			}
+			for name, mutate := range map[string]func(*Result){
+				"old full target": func(result *Result) { result.GlobalUpdate = 2000 },
+				"missing snapshot": func(result *Result) {
+					result.ValidationSnapshots = result.ValidationSnapshots[:len(result.ValidationSnapshots)-1]
+				},
+				"off cadence snapshot": func(result *Result) { result.ValidationSnapshots[1].Update++ },
+				"non-finite train":     func(result *Result) { result.FinalTraining.Loss = math.Inf(1) },
+				"best after target":    func(result *Result) { result.BestValidationStep = config.TargetUpdates + 1 },
+				"missing safety":       func(result *Result) { result.ProductionSafety = nil },
+				"partial safety":       func(result *Result) { result.ProductionSafety.UpdatesChecked-- },
+			} {
+				t.Run(name, func(t *testing.T) {
+					candidate := passing
+					candidate.ValidationSnapshots = append([]ValidationSnapshot(nil), passing.ValidationSnapshots...)
+					candidate.ProductionSafety = cloneProductionSafety(passing.ProductionSafety)
+					mutate(&candidate)
+					if productionRunPassed(config, candidate) {
+						t.Fatal("incomplete production-style result passed")
+					}
+				})
 			}
 		})
 	}
@@ -74,7 +78,7 @@ func productionResultForTest(config Config) Result {
 	}
 	metrics := Metrics{Loss: 1, Top1: .1, Top5: .2, Top16: .3}
 	return Result{
-		Stage:                    Production,
+		Stage:                    config.Stage,
 		GlobalUpdate:             config.TargetUpdates,
 		InitialTraining:          metrics,
 		FinalTraining:            metrics,
@@ -171,6 +175,13 @@ func TestProductionBootstrapAndCheckpointStateMatchers(t *testing.T) {
 	}
 	if !isProductionBootstrap(production, runstate.ErrStateNotFound) {
 		t.Fatal("production bootstrap was not accepted without initial state")
+	}
+	replication, err := ConfigFor(SeedReplication)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !isProductionBootstrap(replication, runstate.ErrStateNotFound) {
+		t.Fatal("seed-replication bootstrap was not accepted without initial state")
 	}
 	full, err := ConfigFor(Full)
 	if err != nil {

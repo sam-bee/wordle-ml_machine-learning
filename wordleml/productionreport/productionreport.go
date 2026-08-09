@@ -193,10 +193,14 @@ type fixedConfig struct {
 }
 
 func (config fixedConfig) validate(stage string, updates int64) error {
+	seed := proofrun.Seed
+	if proofrun.Stage(stage) == proofrun.SeedReplication {
+		seed = proofrun.SeedReplicationSeed
+	}
 	want := fixedConfig{
 		Stage: stage, BatchSize: 256, LearningRate: 3e-4, TargetUpdates: updates,
 		ValidationEvery: validationEvery, CheckpointEvery: validationEvery, ScalarEvery: scalarEvery,
-		Seed: 20260808, Precision: "float32", Objective: "masked_sparse_cross_entropy_teacher_top1",
+		Seed: seed, Precision: "float32", Objective: "masked_sparse_cross_entropy_teacher_top1",
 		Optimizer: "Adam", LearningRateMode: "constant", WeightDecay: 0, GradientClipNorm: 5,
 	}
 	if config != want {
@@ -484,7 +488,7 @@ func validateFinal(final finalMetrics, stage string, updates int64) error {
 	if final.BestValidationStep < 0 || final.BestValidationStep > updates || final.BestValidationStep%validationEvery != 0 {
 		return fmt.Errorf("best validation update %d is not a checkpoint boundary", final.BestValidationStep)
 	}
-	if stage == "production" {
+	if proofrun.IsProductionStyle(proofrun.Stage(stage)) {
 		safety := final.ProductionSafety
 		if safety == nil || !safety.LossFinite || !safety.GradientsFinite || !safety.ParametersFinite || safety.UpdatesChecked != updates {
 			return errors.New("production run lacks complete finite loss, gradient, and parameter evidence")

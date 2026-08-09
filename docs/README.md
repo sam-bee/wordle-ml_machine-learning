@@ -10,7 +10,7 @@ Current project documentation:
 - [`ml/board-state-encoding.md`](ml/board-state-encoding.md) describes the four precomputed tensors consumed by the model.
 - [`ml/inference-serving.md`](ml/inference-serving.md) describes the warm CUDA inference API and browser gameplay flow.
 - [`ml/supervised-training.md`](ml/supervised-training.md) describes the frozen teacher corpus, loss, metrics, and
-  completed initial supervised-training proof, with a link to its report.
+  completed proof/production evidence plus the fixed independent-seed replication workflow.
 - [`ml/initial-training-proof-report.md`](ml/initial-training-proof-report.md) is the generated evidence from the
   completed fixed validation proof.
 - [`ml/production-training-report.md`](ml/production-training-report.md) is the generated validation-only comparison

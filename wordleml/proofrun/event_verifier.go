@@ -180,7 +180,7 @@ func verifyTensorBoardInspection(inspection tensorboard.Inspection, stage Stage)
 		}
 	}
 	openingSteps := combinedSteps(trainingSteps, validationSteps)
-	if stage == Production {
+	if IsProductionStyle(stage) {
 		openingSteps = uniqueSortedSteps(openingSteps)
 	}
 	for _, tag := range openingTrainingAndValidationTags {
@@ -280,7 +280,7 @@ func requireExactCadence(tag string, got, want []int64) error {
 // therefore checked by unique step coverage rather than event count.
 func requireStageScalarCadence(stage Stage, tag string, records []tensorboard.ScalarRecord, want []int64) ([]int64, error) {
 	steps := stepsForScalars(records, tag)
-	if stage == Production {
+	if IsProductionStyle(stage) {
 		for _, record := range records {
 			if record.Tag == tag && !finiteEventScalar(record.Value) {
 				return nil, fmt.Errorf("%s at update %d is non-finite: %v", tag, record.Step, record.Value)
@@ -299,7 +299,7 @@ func requireStageScalarCadence(stage Stage, tag string, records []tensorboard.Sc
 // event segment cannot hide malformed numerical telemetry behind de-duplication.
 func requireStageHistogramCadence(stage Stage, tag string, records []tensorboard.HistogramRecord, want []int64) ([]int64, error) {
 	steps := stepsForHistograms(records, tag)
-	if stage == Production {
+	if IsProductionStyle(stage) {
 		for _, record := range records {
 			if record.Tag == tag && (math.IsNaN(record.Count) || math.IsInf(record.Count, 0)) {
 				return nil, fmt.Errorf("%s histogram at update %d has non-finite count: %v", tag, record.Step, record.Count)

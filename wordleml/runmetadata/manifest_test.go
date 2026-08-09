@@ -301,6 +301,19 @@ func validManifest() Manifest {
 	}
 }
 
+func TestManifestCanRecordCompletelyUnopenedFinalTest(t *testing.T) {
+	manifest := validManifest()
+	manifest.FinalTestSealed = true
+	manifest.Splits.Test = nil
+	if err := manifest.Validate(); err != nil {
+		t.Fatalf("sealed manifest: %v", err)
+	}
+	manifest.Splits.Test = []Artifact{{Path: "test", SHA256: strings.Repeat("a", 64)}}
+	if err := manifest.Validate(); err == nil || !strings.Contains(err.Error(), "must not contain") {
+		t.Fatalf("sealed manifest with test artifact error = %v", err)
+	}
+}
+
 func makeGitRepository(t *testing.T, root, name string) string {
 	t.Helper()
 	directory := filepath.Join(root, name)

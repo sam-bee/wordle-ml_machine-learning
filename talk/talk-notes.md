@@ -127,6 +127,14 @@ gradually and keep the Wordle problem visible throughout, rather than turning in
   is a useful lesson: a small validation metric improvement did not improve
   this gameplay success rate. Keep the claim validation-only and the final
   test sealed.
+- Follow that result with exactly one predeclared seed-20260809 replication.
+  It changes only initialization/sampling seed and run identity; the model,
+  frozen data, objective, optimiser, batch size, learning rate, clipping,
+  10,000-update budget, telemetry, checkpointing, and validation protocol stay
+  fixed. Frame it as a minimal independent-initialisation robustness check,
+  not tuning and not a two-seed statistical study. Its separate report will
+  pair all 2,500 teacher-top-1 decisions and all 100 validation games while
+  leaving the selected-model story and final test untouched.
 - For the live demo, use the web application's run picker to contrast the
   retained proof and production best checkpoints. Changing the selection
   restores and warms that checkpoint on CUDA before it becomes active; the
