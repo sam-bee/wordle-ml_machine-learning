@@ -75,7 +75,11 @@ func parseConfig(args []string, stderr io.Writer) (config, error) {
 	if config.stage == "" {
 		return config, errors.New("-stage is required")
 	}
-	if _, err := proofrun.ConfigFor(proofrun.Stage(config.stage)); err != nil {
+	stage := proofrun.Stage(config.stage)
+	if stage != proofrun.Overfit && stage != proofrun.Mini && stage != proofrun.Full {
+		return config, fmt.Errorf("unknown proof stage %q", config.stage)
+	}
+	if _, err := proofrun.ConfigFor(stage); err != nil {
 		return config, err
 	}
 	return config, nil

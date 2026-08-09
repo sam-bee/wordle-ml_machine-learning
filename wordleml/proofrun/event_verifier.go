@@ -150,10 +150,18 @@ func verifyTensorBoardInspection(inspection tensorboard.Inspection, stage Stage)
 	}
 	trainingSteps := expectedSteps(config.ScalarEvery, config.ScalarEvery, config.TargetUpdates)
 	validationSteps := expectedSteps(0, config.ValidationEvery, config.TargetUpdates)
+	recordedTrainingSteps, err := requireStageScalarCadence(stage, "train/loss", inspection.Scalars, trainingSteps)
+	if err != nil {
+		return TensorBoardProof{}, err
+	}
+	recordedValidationSteps, err := requireStageScalarCadence(stage, "validation/loss", inspection.Scalars, validationSteps)
+	if err != nil {
+		return TensorBoardProof{}, err
+	}
 	proof := TensorBoardProof{
 		Stage:               stage,
-		TrainingSteps:       stepsForScalars(inspection.Scalars, "train/loss"),
-		ValidationSteps:     stepsForScalars(inspection.Scalars, "validation/loss"),
+		TrainingSteps:       recordedTrainingSteps,
+		ValidationSteps:     recordedValidationSteps,
 		HistogramStepsByTag: make(map[string][]int64, len(miniValidationHistogramTags)),
 	}
 	if stage == Mini {
@@ -162,26 +170,30 @@ func verifyTensorBoardInspection(inspection tensorboard.Inspection, stage Stage)
 		}
 	}
 	for _, tag := range trainingScalarTags {
-		if err := requireExactCadence(tag, stepsForScalars(inspection.Scalars, tag), trainingSteps); err != nil {
+		if _, err := requireStageScalarCadence(stage, tag, inspection.Scalars, trainingSteps); err != nil {
 			return TensorBoardProof{}, err
 		}
 	}
 	for _, tag := range validationScalarTags {
-		if err := requireExactCadence(tag, stepsForScalars(inspection.Scalars, tag), validationSteps); err != nil {
+		if _, err := requireStageScalarCadence(stage, tag, inspection.Scalars, validationSteps); err != nil {
 			return TensorBoardProof{}, err
 		}
 	}
+	openingSteps := combinedSteps(trainingSteps, validationSteps)
+	if stage == Production {
+		openingSteps = uniqueSortedSteps(openingSteps)
+	}
 	for _, tag := range openingTrainingAndValidationTags {
-		if err := requireExactCadence(tag, stepsForScalars(inspection.Scalars, tag), combinedSteps(trainingSteps, validationSteps)); err != nil {
+		if _, err := requireStageScalarCadence(stage, tag, inspection.Scalars, openingSteps); err != nil {
 			return TensorBoardProof{}, err
 		}
 	}
 	for _, tag := range miniValidationHistogramTags {
-		steps := stepsForHistograms(inspection.Histograms, tag)
-		proof.HistogramStepsByTag[tag] = steps
-		if err := requireExactCadence(tag, steps, validationSteps); err != nil {
+		steps, err := requireStageHistogramCadence(stage, tag, inspection.Histograms, validationSteps)
+		if err != nil {
 			return TensorBoardProof{}, err
 		}
+		proof.HistogramStepsByTag[tag] = steps
 	}
 	if stage == Mini {
 		if err := requireResumeBoundary(proof.TrainingSteps); err != nil {
@@ -261,12 +273,67 @@ func requireExactCadence(tag string, got, want []int64) error {
 	return nil
 }
 
+// requireStageScalarCadence retains the proof stages' strict one-event-per-
+// step rule. A production process can be interrupted after telemetry has been
+// flushed but before the next checkpoint, so its resumed process can append
+// finite replacements for an already-recorded suffix. Production evidence is
+// therefore checked by unique step coverage rather than event count.
+func requireStageScalarCadence(stage Stage, tag string, records []tensorboard.ScalarRecord, want []int64) ([]int64, error) {
+	steps := stepsForScalars(records, tag)
+	if stage == Production {
+		for _, record := range records {
+			if record.Tag == tag && !finiteEventScalar(record.Value) {
+				return nil, fmt.Errorf("%s at update %d is non-finite: %v", tag, record.Step, record.Value)
+			}
+		}
+		steps = uniqueSortedSteps(steps)
+	}
+	if err := requireExactCadence(tag, steps, want); err != nil {
+		return nil, err
+	}
+	return steps, nil
+}
+
+// requireStageHistogramCadence applies the same production resume rule to
+// validation histograms. Histogram counts are checked as finite so a resumed
+// event segment cannot hide malformed numerical telemetry behind de-duplication.
+func requireStageHistogramCadence(stage Stage, tag string, records []tensorboard.HistogramRecord, want []int64) ([]int64, error) {
+	steps := stepsForHistograms(records, tag)
+	if stage == Production {
+		for _, record := range records {
+			if record.Tag == tag && (math.IsNaN(record.Count) || math.IsInf(record.Count, 0)) {
+				return nil, fmt.Errorf("%s histogram at update %d has non-finite count: %v", tag, record.Step, record.Count)
+			}
+		}
+		steps = uniqueSortedSteps(steps)
+	}
+	if err := requireExactCadence(tag, steps, want); err != nil {
+		return nil, err
+	}
+	return steps, nil
+}
+
 func combinedSteps(first, second []int64) []int64 {
 	steps := make([]int64, 0, len(first)+len(second))
 	steps = append(steps, first...)
 	steps = append(steps, second...)
 	slices.Sort(steps)
 	return steps
+}
+
+func uniqueSortedSteps(steps []int64) []int64 {
+	if len(steps) == 0 {
+		return nil
+	}
+	sorted := slices.Clone(steps)
+	slices.Sort(sorted)
+	unique := make([]int64, 0, len(sorted))
+	for _, step := range sorted {
+		if len(unique) == 0 || unique[len(unique)-1] != step {
+			unique = append(unique, step)
+		}
+	}
+	return unique
 }
 
 func trainingLossTrend(records []tensorboard.ScalarRecord, steps []int64) (TrainingLossTrend, error) {

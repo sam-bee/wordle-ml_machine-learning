@@ -28,6 +28,10 @@ const (
 	Overfit Stage = "overfit"
 	Mini    Stage = "mini"
 	Full    Stage = "full"
+	// Production is the one fixed long supervised-training run. It is separate
+	// from Full so the retained 2,000-update proof configuration and gate never
+	// change meaning.
+	Production Stage = "production"
 )
 
 // Config is recorded verbatim in config.json and is intentionally limited to
@@ -77,6 +81,10 @@ func ConfigFor(stage Stage) (Config, error) {
 		config.BatchSize = 256
 		config.LearningRate = 3e-4
 		config.TargetUpdates = 2000
+	case Production:
+		config.BatchSize = 256
+		config.LearningRate = 3e-4
+		config.TargetUpdates = 10000
 	default:
 		return Config{}, fmt.Errorf("unknown proof stage %q", stage)
 	}

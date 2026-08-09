@@ -35,6 +35,49 @@ func TestFixedStageConfigs(t *testing.T) {
 	}
 }
 
+func TestProductionConfigIsExactlyFixed(t *testing.T) {
+	got, err := ConfigFor(Production)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := Config{
+		Stage:            Production,
+		BatchSize:        256,
+		LearningRate:     3e-4,
+		TargetUpdates:    10000,
+		ValidationEvery:  100,
+		CheckpointEvery:  100,
+		ScalarEvery:      10,
+		Seed:             Seed,
+		Precision:        "float32",
+		Objective:        "masked_sparse_cross_entropy_teacher_top1",
+		Optimizer:        "Adam",
+		LearningRateMode: "constant",
+		WeightDecay:      0,
+		GradientClipNorm: 5,
+	}
+	if got != want {
+		t.Fatalf("production config = %#v, want %#v", got, want)
+	}
+}
+
+func TestProofStageConfigurationsRemainExactlyUnchanged(t *testing.T) {
+	want := map[Stage]Config{
+		Overfit: {Stage: Overfit, BatchSize: 128, LearningRate: 1e-3, TargetUpdates: 400, ValidationEvery: 100, CheckpointEvery: 100, ScalarEvery: 10, Seed: Seed, Precision: "float32", Objective: "masked_sparse_cross_entropy_teacher_top1", Optimizer: "Adam", LearningRateMode: "constant", WeightDecay: 0, GradientClipNorm: 5},
+		Mini:    {Stage: Mini, BatchSize: 128, LearningRate: 3e-4, TargetUpdates: 1000, ValidationEvery: 100, CheckpointEvery: 100, ScalarEvery: 10, Seed: Seed, Precision: "float32", Objective: "masked_sparse_cross_entropy_teacher_top1", Optimizer: "Adam", LearningRateMode: "constant", WeightDecay: 0, GradientClipNorm: 5},
+		Full:    {Stage: Full, BatchSize: 256, LearningRate: 3e-4, TargetUpdates: 2000, ValidationEvery: 100, CheckpointEvery: 100, ScalarEvery: 10, Seed: Seed, Precision: "float32", Objective: "masked_sparse_cross_entropy_teacher_top1", Optimizer: "Adam", LearningRateMode: "constant", WeightDecay: 0, GradientClipNorm: 5},
+	}
+	for stage, expected := range want {
+		got, err := ConfigFor(stage)
+		if err != nil {
+			t.Fatalf("ConfigFor(%q): %v", stage, err)
+		}
+		if got != expected {
+			t.Errorf("ConfigFor(%q) = %#v, want %#v", stage, got, expected)
+		}
+	}
+}
+
 func TestValidationBatchSizeIsExactForFrozenSplit(t *testing.T) {
 	if validationBatchSize != 100 || 2500%validationBatchSize != 0 {
 		t.Fatalf("validation batch size %d does not divide 2,500 records", validationBatchSize)
@@ -84,6 +127,10 @@ func TestStopAtAndImmutableConfig(t *testing.T) {
 	overfit, _ := ConfigFor(Overfit)
 	if err := ValidateStopAt(overfit, 500); err == nil {
 		t.Error("ValidateStopAt accepted overfit stop")
+	}
+	production, _ := ConfigFor(Production)
+	if err := ValidateStopAt(production, 500); err == nil {
+		t.Error("ValidateStopAt accepted production stop")
 	}
 	if err := validateStopAtForRun(mini, true, 500); err == nil {
 		t.Error("validateStopAtForRun accepted repeated mini stop")

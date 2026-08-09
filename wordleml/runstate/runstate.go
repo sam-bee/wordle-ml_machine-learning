@@ -19,25 +19,30 @@ import (
 )
 
 const (
-	configFilename          = "config.json"
-	metadataFilename        = "metadata.json"
-	stateFilename           = "run-state.json"
-	finalMetricsFilename    = "final-metrics.json"
-	validationGamesFilename = "validation-games.jsonl"
-	trainingLogFilename     = "training.log"
-	eventsDirectory         = "events"
-	checkpointsDirectory    = "checkpoints"
-	latestCheckpointDir     = "latest"
-	bestCheckpointDir       = "best"
-	initialCheckpointDir    = "initial"
-	evaluationsDirectory    = "evaluations"
-	maximumRunIDLength      = 128
-	checkpointStateParam    = "supervised_run_state"
+	configFilename             = "config.json"
+	metadataFilename           = "metadata.json"
+	stateFilename              = "run-state.json"
+	checkpointProgressFilename = "checkpoint-progress.json"
+	finalMetricsFilename       = "final-metrics.json"
+	validationGamesFilename    = "validation-games.jsonl"
+	trainingLogFilename        = "training.log"
+	eventsDirectory            = "events"
+	checkpointsDirectory       = "checkpoints"
+	latestCheckpointDir        = "latest"
+	bestCheckpointDir          = "best"
+	initialCheckpointDir       = "initial"
+	evaluationsDirectory       = "evaluations"
+	maximumRunIDLength         = 128
+	checkpointStateParam       = "supervised_run_state"
 )
 
 // ErrStateNotFound indicates that a run has not saved its first checkpoint
 // state yet. It is distinct from malformed state.
 var ErrStateNotFound = errors.New("run state not found")
+
+// ErrCheckpointProgressNotFound indicates that no pre-checkpoint progress
+// journal has been published yet. It is distinct from malformed journal JSON.
+var ErrCheckpointProgressNotFound = errors.New("checkpoint progress not found")
 
 // Layout names every artifact belonging to one run. All paths are derived from
 // Root and a validated ID; callers do not supply individual artifact paths.
@@ -46,18 +51,19 @@ type Layout struct {
 	ID   string
 	Dir  string
 
-	ConfigPath           string
-	MetadataPath         string
-	StatePath            string
-	EventsDir            string
-	CheckpointsDir       string
-	LatestCheckpointDir  string
-	BestCheckpointDir    string
-	InitialCheckpointDir string
-	EvaluationsDir       string
-	FinalMetricsPath     string
-	ValidationGamesPath  string
-	TrainingLogPath      string
+	ConfigPath             string
+	MetadataPath           string
+	StatePath              string
+	CheckpointProgressPath string
+	EventsDir              string
+	CheckpointsDir         string
+	LatestCheckpointDir    string
+	BestCheckpointDir      string
+	InitialCheckpointDir   string
+	EvaluationsDir         string
+	FinalMetricsPath       string
+	ValidationGamesPath    string
+	TrainingLogPath        string
 }
 
 // New returns the planned layout without creating anything on disk.
@@ -79,21 +85,22 @@ func New(root, runID string) (Layout, error) {
 	}
 	checkpointsDir := filepath.Join(runDir, checkpointsDirectory)
 	return Layout{
-		Root:                 absoluteRoot,
-		ID:                   runID,
-		Dir:                  runDir,
-		ConfigPath:           filepath.Join(runDir, configFilename),
-		MetadataPath:         filepath.Join(runDir, metadataFilename),
-		StatePath:            filepath.Join(runDir, stateFilename),
-		EventsDir:            filepath.Join(runDir, eventsDirectory),
-		CheckpointsDir:       checkpointsDir,
-		LatestCheckpointDir:  filepath.Join(checkpointsDir, latestCheckpointDir),
-		BestCheckpointDir:    filepath.Join(checkpointsDir, bestCheckpointDir),
-		InitialCheckpointDir: filepath.Join(checkpointsDir, initialCheckpointDir),
-		EvaluationsDir:       filepath.Join(runDir, evaluationsDirectory),
-		FinalMetricsPath:     filepath.Join(runDir, finalMetricsFilename),
-		ValidationGamesPath:  filepath.Join(runDir, validationGamesFilename),
-		TrainingLogPath:      filepath.Join(runDir, trainingLogFilename),
+		Root:                   absoluteRoot,
+		ID:                     runID,
+		Dir:                    runDir,
+		ConfigPath:             filepath.Join(runDir, configFilename),
+		MetadataPath:           filepath.Join(runDir, metadataFilename),
+		StatePath:              filepath.Join(runDir, stateFilename),
+		CheckpointProgressPath: filepath.Join(runDir, checkpointProgressFilename),
+		EventsDir:              filepath.Join(runDir, eventsDirectory),
+		CheckpointsDir:         checkpointsDir,
+		LatestCheckpointDir:    filepath.Join(checkpointsDir, latestCheckpointDir),
+		BestCheckpointDir:      filepath.Join(checkpointsDir, bestCheckpointDir),
+		InitialCheckpointDir:   filepath.Join(checkpointsDir, initialCheckpointDir),
+		EvaluationsDir:         filepath.Join(runDir, evaluationsDirectory),
+		FinalMetricsPath:       filepath.Join(runDir, finalMetricsFilename),
+		ValidationGamesPath:    filepath.Join(runDir, validationGamesFilename),
+		TrainingLogPath:        filepath.Join(runDir, trainingLogFilename),
 	}, nil
 }
 
@@ -251,6 +258,30 @@ func (layout Layout) WriteStateMirror(state State) error {
 		return err
 	}
 	return writeJSONAtomically(layout.StatePath, state)
+}
+
+// WriteCheckpointProgress atomically records the validated runner progress
+// which is about to be checkpointed.  The runner writes this journal before
+// publishing the corresponding latest checkpoint, then writes final metrics
+// only after the checkpoint is durable.  It lets a resumed production run
+// recover the one crash window between those two publications without putting
+// its potentially large validation history into every model checkpoint.
+func (layout Layout) WriteCheckpointProgress(progress any) error {
+	return writeJSONAtomically(layout.CheckpointProgressPath, progress)
+}
+
+// LoadCheckpointProgress returns the raw JSON checkpoint-progress journal.
+// The caller owns decoding because the journal's typed payload belongs to the
+// training package, not runstate.
+func (layout Layout) LoadCheckpointProgress() ([]byte, error) {
+	contents, err := os.ReadFile(layout.CheckpointProgressPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, ErrCheckpointProgressNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read checkpoint progress %q: %w", layout.CheckpointProgressPath, err)
+	}
+	return contents, nil
 }
 
 // LoadStateMirror reads the human-readable diagnostic state mirror.

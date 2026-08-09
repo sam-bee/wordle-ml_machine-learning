@@ -61,7 +61,18 @@ type Result struct {
 	ValidationSnapshots      []ValidationSnapshot            `json:"validation_snapshots,omitempty"`
 	ResumeProof              *ResumeProof                    `json:"resume_proof,omitempty"`
 	TelemetryProof           *MiniTelemetryProof             `json:"telemetry_proof,omitempty"`
+	ProductionSafety         *ProductionSafety               `json:"production_safety,omitempty"`
 	Evaluations              map[string]json.RawMessage      `json:"evaluations,omitempty"`
+}
+
+// ProductionSafety is durable evidence that every production update reached
+// the existing loss, gradient, and trainable-parameter finite checks. It is
+// intentionally absent from the retained proof artifacts.
+type ProductionSafety struct {
+	LossFinite       bool  `json:"loss_finite"`
+	GradientsFinite  bool  `json:"gradients_finite"`
+	ParametersFinite bool  `json:"parameters_finite"`
+	UpdatesChecked   int64 `json:"updates_checked"`
 }
 
 // InitialGamesEvaluation identifies the run-zero gameplay artifact recorded
@@ -224,27 +235,55 @@ func Run(options Options, stdout io.Writer) (Result, error) {
 		}
 	}()
 
-	state, err := initialState(session, resumed, config)
+	state, bootstrap, err := initialState(session, resumed, config)
 	if err != nil {
 		return Result{}, err
 	}
+	fresh := !resumed || bootstrap
 	if session.Trainer.GlobalStep() != state.GlobalUpdate {
 		return Result{}, fmt.Errorf("checkpoint global update %d differs from run state %d", session.Trainer.GlobalStep(), state.GlobalUpdate)
 	}
 	if err := ValidateResumeState(config, state); err != nil {
 		return Result{}, fmt.Errorf("validate resume state: %w", err)
 	}
+	bootstrapMetadataExists := false
 	if resumed {
 		if err := warmValidationShapes(session, validationData, opening); err != nil {
 			return Result{}, fmt.Errorf("warm restored inference before metadata validation: %w", err)
 		}
-		if err := validateManifestIdentity(layout, options.DataDir, config, trainData, session, backend); err != nil {
-			return Result{}, err
+		if config.Stage == Production {
+			if err := validateFiniteTrainableParameters(session.Store); err != nil {
+				return Result{}, fmt.Errorf("validate restored production parameters: %w", err)
+			}
+		}
+		if bootstrap {
+			_, err := os.Stat(layout.MetadataPath)
+			switch {
+			case err == nil:
+				if err := validateManifestIdentity(layout, options.DataDir, config, trainData, session, backend); err != nil {
+					return Result{}, err
+				}
+				bootstrapMetadataExists = true
+			case errors.Is(err, os.ErrNotExist):
+				// The interruption happened before immutable metadata was
+				// published. The initial bootstrap below will publish it.
+			default:
+				return Result{}, fmt.Errorf("inspect immutable run metadata %q: %w", layout.MetadataPath, err)
+			}
+		} else {
+			if err := validateManifestIdentity(layout, options.DataDir, config, trainData, session, backend); err != nil {
+				return Result{}, err
+			}
+			if config.Stage == Production {
+				if err := repairProductionCheckpointCopies(backend, layout, latest, session, state, config); err != nil {
+					return Result{}, err
+				}
+			}
 		}
 	}
-	log("stage=%s resumed=%t global_update=%d", config.Stage, resumed, state.GlobalUpdate)
+	log("stage=%s resumed=%t bootstrap=%t global_update=%d", config.Stage, resumed && !bootstrap, bootstrap, state.GlobalUpdate)
 
-	if !resumed {
+	if fresh {
 		if err := session.Trainer.ResetTrainMetrics(); err != nil {
 			return Result{}, fmt.Errorf("reset training metrics: %w", err)
 		}
@@ -262,6 +301,10 @@ func Run(options Options, stdout io.Writer) (Result, error) {
 	validationImprovements := 0
 	var resumeProof *ResumeProof
 	var telemetryProof *MiniTelemetryProof
+	var productionSafety *ProductionSafety
+	if config.Stage == Production {
+		productionSafety = &ProductionSafety{}
+	}
 	evaluations := make(map[string]json.RawMessage)
 	var sampler *imitationdata.TrainingSampler
 	var uninterruptedReference *imitationdata.TrainingSampler
@@ -270,9 +313,14 @@ func Run(options Options, stdout io.Writer) (Result, error) {
 		if err != nil {
 			return Result{}, fmt.Errorf("restore training sampler: %w", err)
 		}
-		if resumed {
+		if !fresh {
 			if err := validateSamplerPeek(state, sampler); err != nil {
 				return Result{}, err
+			}
+			if config.Stage == Production {
+				if err := validateProductionSamplerResumeState(state, sampler, sourceData, opening, config); err != nil {
+					return Result{}, err
+				}
 			}
 		}
 		if config.Stage == Mini && !resumed && options.StopAt != 0 {
@@ -303,10 +351,11 @@ func Run(options Options, stdout io.Writer) (Result, error) {
 			ValidationSnapshots:      validationSnapshots,
 			ResumeProof:              cloneResumeProof(resumeProof),
 			TelemetryProof:           cloneMiniTelemetryProof(telemetryProof),
+			ProductionSafety:         cloneProductionSafety(productionSafety),
 			Evaluations:              cloneEvaluations(evaluations),
 		}
 	}
-	if !resumed {
+	if fresh {
 		evaluatedInitial, samples, err := evaluateDetailed(session, validationData, opening, func(action int) string {
 			word, _ := vocab.ActionWord(action)
 			return word
@@ -325,8 +374,10 @@ func Run(options Options, stdout io.Writer) (Result, error) {
 		finalValidationDetails = initialValidationDetails
 		finalValidation = initialValidation
 		validationSnapshots = append(validationSnapshots, initialValidationDetails)
-		if err := writeManifest(layout, options.DataDir, config, trainData, session, backend); err != nil {
-			return Result{}, err
+		if !bootstrapMetadataExists {
+			if err := writeManifest(layout, options.DataDir, config, trainData, session, backend); err != nil {
+				return Result{}, err
+			}
 		}
 		state.BestValidation = &runstate.BestValidation{Value: initialValidation.Loss, Update: 0}
 		if sampler != nil {
@@ -335,6 +386,18 @@ func Run(options Options, stdout io.Writer) (Result, error) {
 		}
 		if err := writeValidationTelemetry(events, 0, initialValidationDetails, samples, session); err != nil {
 			return Result{}, err
+		}
+		if config.Stage == Production {
+			if err := validateFiniteTrainableParameters(session.Store); err != nil {
+				return Result{}, fmt.Errorf("validate initial production parameters: %w", err)
+			}
+			checkpointProgress := progressResult(0)
+			if err := validatePriorValidationEvidence(checkpointProgress, validationData.Len()); err != nil {
+				return Result{}, fmt.Errorf("validate initial checkpoint progress: %w", err)
+			}
+			if err := layout.WriteCheckpointProgress(checkpointProgress); err != nil {
+				return Result{}, fmt.Errorf("write initial checkpoint progress: %w", err)
+			}
 		}
 		if err := saveLatest(layout, latest, session, state); err != nil {
 			return Result{}, err
@@ -379,7 +442,7 @@ func Run(options Options, stdout io.Writer) (Result, error) {
 		}
 		log("validation step=0 loss=%g top1=%g top5=%g top16=%g opening_guess=%s", initialValidation.Loss, initialValidation.Top1, initialValidation.Top5, initialValidation.Top16, initialValidationDetails.OpeningWord)
 	} else {
-		previous, err := loadPriorResult(layout)
+		previous, recoveredCheckpointProgress, err := loadPriorResult(layout, state, config.Stage == Production)
 		if err != nil {
 			return Result{}, err
 		}
@@ -393,6 +456,7 @@ func Run(options Options, stdout io.Writer) (Result, error) {
 		}
 		validationSnapshots = append(validationSnapshots, previous.ValidationSnapshots...)
 		telemetryProof = cloneMiniTelemetryProof(previous.TelemetryProof)
+		productionSafety = cloneProductionSafety(previous.ProductionSafety)
 		evaluations = cloneEvaluations(previous.Evaluations)
 		if previous.GlobalUpdate != state.GlobalUpdate {
 			return Result{}, fmt.Errorf("prior final metrics update %d differs from checkpoint state update %d", previous.GlobalUpdate, state.GlobalUpdate)
@@ -402,6 +466,17 @@ func Run(options Options, stdout io.Writer) (Result, error) {
 		}
 		if bestValidation.Loss != state.BestValidation.Value {
 			return Result{}, fmt.Errorf("prior best validation loss %g differs from checkpoint state %g", bestValidation.Loss, state.BestValidation.Value)
+		}
+		if config.Stage == Production {
+			if err := validateProductionSafetyProgress(productionSafety, state.GlobalUpdate); err != nil {
+				return Result{}, fmt.Errorf("prior production safety evidence: %w", err)
+			}
+		}
+		if recoveredCheckpointProgress {
+			if err := writeFinalMetrics(layout, previous); err != nil {
+				return Result{}, fmt.Errorf("recover final metrics from checkpoint progress: %w", err)
+			}
+			log("recovered final metrics from checkpoint-progress update=%d", state.GlobalUpdate)
 		}
 		if config.Stage == Mini {
 			resumeProof, err = resumeProofForResume(state, previous.ResumeProof)
@@ -482,6 +557,18 @@ func Run(options Options, stdout io.Writer) (Result, error) {
 		if err := validateTrainingDiagnostics(diagnostics); err != nil {
 			return Result{}, fmt.Errorf("training safety check at update %d: %w", step, err)
 		}
+		if config.Stage == Production {
+			if productionSafety == nil {
+				return Result{}, errors.New("production safety evidence was not initialized")
+			}
+			productionSafety.LossFinite = true
+			productionSafety.GradientsFinite = true
+			productionSafety.ParametersFinite = true
+			productionSafety.UpdatesChecked++
+			if productionSafety.UpdatesChecked != step {
+				return Result{}, fmt.Errorf("production safety checks %d differ from global update %d", productionSafety.UpdatesChecked, step)
+			}
+		}
 		if step%config.ScalarEvery == 0 {
 			openingMetrics, openingWord, err := evaluateOpening(session, opening, func(action int) string { word, _ := vocab.ActionWord(action); return word })
 			if err != nil {
@@ -531,6 +618,15 @@ func Run(options Options, stdout io.Writer) (Result, error) {
 		if sampler != nil {
 			cursor := sampler.Cursor()
 			state.DatasetEpoch, state.ShuffledCursor, state.NextRecordIDs = cursor.Epoch, cursor.Offset, sampler.Peek()
+		}
+		if config.Stage == Production {
+			checkpointProgress := progressResult(step)
+			if err := validatePriorValidationEvidence(checkpointProgress, validationData.Len()); err != nil {
+				return Result{}, fmt.Errorf("validate checkpoint progress at update %d: %w", step, err)
+			}
+			if err := layout.WriteCheckpointProgress(checkpointProgress); err != nil {
+				return Result{}, fmt.Errorf("write checkpoint progress at update %d: %w", step, err)
+			}
 		}
 		if err := saveLatest(layout, latest, session, state); err != nil {
 			return Result{}, err
@@ -597,6 +693,16 @@ func Run(options Options, stdout io.Writer) (Result, error) {
 			gateErr = fmt.Errorf("full proof gate failed: training loss %g -> %g, validation initial=%+v best=%+v, improving validation checkpoints %d, improving major groups turns=%d/%v shortlist=%d/%v (minimum %d examples)", result.InitialTraining.Loss, result.FinalTraining.Loss, result.InitialValidation, result.BestValidation, result.ValidationImprovements, result.MajorGroupLearning.TurnCount, result.MajorGroupLearning.TurnGroups, result.MajorGroupLearning.ShortlistCount, result.MajorGroupLearning.ShortlistGroups, result.MajorGroupLearning.MinimumExamples)
 		}
 	}
+	if config.Stage == Production {
+		if _, err := VerifyTensorBoardEvents(layout.EventsDir, Production); err != nil {
+			gateErr = fmt.Errorf("verify complete production TensorBoard telemetry: %w", err)
+		} else {
+			result.Passed = productionRunPassed(config, result)
+			if !result.Passed {
+				gateErr = fmt.Errorf("production completion check failed: update=%d target=%d initial_train=%+v final_train=%+v initial_validation=%+v final_validation=%+v best_validation=%+v snapshots=%d", result.GlobalUpdate, config.TargetUpdates, result.InitialTraining, result.FinalTraining, result.InitialValidation, result.FinalValidation, result.BestValidation, len(result.ValidationSnapshots))
+			}
+		}
+	}
 	if err := validatePriorValidationEvidence(result, validationData.Len()); err != nil {
 		return Result{}, fmt.Errorf("persist final validation evidence: %w", err)
 	}
@@ -638,18 +744,29 @@ func prepareLayoutForRun(root, runID string, config Config, stopAt int64) (runst
 	return layout, false, nil
 }
 
-func initialState(session *supervised.Session, resumed bool, config Config) (runstate.State, error) {
+// initialState returns bootstrap=true only for a production directory which
+// was created but interrupted before its initial checkpoint state was
+// published.  That directory has no trainable progress yet, so it may safely
+// repeat the immutable bootstrap after config/metadata validation.
+func initialState(session *supervised.Session, resumed bool, config Config) (state runstate.State, bootstrap bool, err error) {
 	if !resumed {
-		return runstate.State{ShuffleSeed: config.Seed}, nil
+		return runstate.State{ShuffleSeed: config.Seed}, false, nil
 	}
-	state, err := runstate.LoadCheckpointState(session.Store)
+	state, err = runstate.LoadCheckpointState(session.Store)
 	if err != nil {
-		return runstate.State{}, fmt.Errorf("load state embedded in latest checkpoint: %w", err)
+		if isProductionBootstrap(config, err) {
+			return runstate.State{ShuffleSeed: config.Seed}, true, nil
+		}
+		return runstate.State{}, false, fmt.Errorf("load state embedded in latest checkpoint: %w", err)
 	}
 	if state.BestValidation == nil {
-		return runstate.State{}, errors.New("resumed checkpoint has no best validation state")
+		return runstate.State{}, false, errors.New("resumed checkpoint has no best validation state")
 	}
-	return state, nil
+	return state, false, nil
+}
+
+func isProductionBootstrap(config Config, err error) bool {
+	return config.Stage == Production && errors.Is(err, runstate.ErrStateNotFound)
 }
 
 func validateSamplerPeek(state runstate.State, sampler *imitationdata.TrainingSampler) error {
@@ -659,6 +776,30 @@ func validateSamplerPeek(state runstate.State, sampler *imitationdata.TrainingSa
 	peek := sampler.Peek()
 	if !slices.Equal(state.NextRecordIDs, peek) {
 		return fmt.Errorf("checkpoint next-record IDs %v do not match resumed sampler %v", state.NextRecordIDs, peek)
+	}
+	return nil
+}
+
+// validateProductionSamplerResumeState establishes that the durable cursor is
+// not merely self-consistent with its stored peek: it must be the exact cursor
+// reached by GlobalUpdate batches from the fixed production sampler origin.
+func validateProductionSamplerResumeState(state runstate.State, sampler *imitationdata.TrainingSampler, source *imitationdata.Data, opening imitationdata.Example, config Config) error {
+	if config.Stage != Production {
+		return errors.New("production sampler validation used for a non-production config")
+	}
+	reference, err := imitationdata.NewTrainingSampler(source, opening, config.BatchSize, config.Seed, imitationdata.Cursor{})
+	if err != nil {
+		return fmt.Errorf("create production sampler reference: %w", err)
+	}
+	if err := reference.AdvanceBatches(int(state.GlobalUpdate)); err != nil {
+		return fmt.Errorf("advance production sampler reference to update %d: %w", state.GlobalUpdate, err)
+	}
+	wantCursor, gotCursor := reference.Cursor(), sampler.Cursor()
+	if wantCursor != gotCursor {
+		return fmt.Errorf("checkpoint sampler cursor %+v differs from update-%d production cursor %+v", gotCursor, state.GlobalUpdate, wantCursor)
+	}
+	if !slices.Equal(reference.Peek(), state.NextRecordIDs) {
+		return fmt.Errorf("checkpoint next-record IDs %v differ from update-%d production reference %v", state.NextRecordIDs, state.GlobalUpdate, reference.Peek())
 	}
 	return nil
 }
@@ -734,6 +875,27 @@ func cloneMiniTelemetryProof(proof *MiniTelemetryProof) *MiniTelemetryProof {
 	return clone
 }
 
+func cloneProductionSafety(safety *ProductionSafety) *ProductionSafety {
+	if safety == nil {
+		return nil
+	}
+	clone := *safety
+	return &clone
+}
+
+func validateProductionSafetyProgress(safety *ProductionSafety, globalUpdate int64) error {
+	if safety == nil {
+		return errors.New("production safety evidence is absent")
+	}
+	if safety.UpdatesChecked != globalUpdate {
+		return fmt.Errorf("production safety checks %d differ from checkpoint update %d", safety.UpdatesChecked, globalUpdate)
+	}
+	if safety.UpdatesChecked > 0 && (!safety.LossFinite || !safety.GradientsFinite || !safety.ParametersFinite) {
+		return fmt.Errorf("production safety evidence is incomplete: loss=%t gradients=%t parameters=%t", safety.LossFinite, safety.GradientsFinite, safety.ParametersFinite)
+	}
+	return nil
+}
+
 func checkpointVerificationExamples(opening imitationdata.Example, validation *imitationdata.Data) ([]imitationdata.Example, error) {
 	if validation == nil || validation.Split() != imitationdata.Validation {
 		return nil, errors.New("checkpoint verification requires validation data")
@@ -777,6 +939,33 @@ func fullGatePassed(result Result) bool {
 		result.ValidationImprovements >= 2 &&
 		result.MajorGroupLearning.TurnCount >= 2 &&
 		result.MajorGroupLearning.ShortlistCount >= 2
+}
+
+// productionRunPassed deliberately establishes artifact completion and numeric
+// safety only. It does not reuse the 2,000-update proof gate or impose a
+// performance threshold on the fixed 10,000-update production run.
+func productionRunPassed(config Config, result Result) bool {
+	if config.Stage != Production || result.Stage != Production || result.GlobalUpdate != config.TargetUpdates || config.TargetUpdates != 10000 || config.ValidationEvery <= 0 {
+		return false
+	}
+	if !result.InitialTraining.Finite() || !result.FinalTraining.Finite() || !result.InitialValidation.Finite() || !result.FinalValidation.Finite() || !result.BestValidation.Finite() {
+		return false
+	}
+	if result.BestValidationStep < 0 || result.BestValidationStep > result.GlobalUpdate {
+		return false
+	}
+	if result.ProductionSafety == nil || !result.ProductionSafety.LossFinite || !result.ProductionSafety.GradientsFinite || !result.ProductionSafety.ParametersFinite || result.ProductionSafety.UpdatesChecked != config.TargetUpdates {
+		return false
+	}
+	if len(result.ValidationSnapshots) != int(config.TargetUpdates/config.ValidationEvery)+1 {
+		return false
+	}
+	for index, snapshot := range result.ValidationSnapshots {
+		if snapshot.Update != int64(index)*config.ValidationEvery || !snapshot.Metrics.Finite() {
+			return false
+		}
+	}
+	return true
 }
 
 func evaluateInitialGames10(
@@ -862,6 +1051,141 @@ func saveLatest(layout runstate.Layout, latest interface{ Save() error }, sessio
 	}
 	if err := layout.WriteStateMirror(state); err != nil {
 		return fmt.Errorf("write latest checkpoint state mirror: %w", err)
+	}
+	return nil
+}
+
+// repairProductionCheckpointCopies completes only copies which can be proven
+// to have been interrupted after the matching latest checkpoint was durable.
+// It never guesses an older best checkpoint: when the latest checkpoint is not
+// itself the recorded best, a missing or mismatched best is a hard error.
+func repairProductionCheckpointCopies(
+	backend compute.Backend,
+	layout runstate.Layout,
+	latest checkpointSource,
+	session *supervised.Session,
+	latestState runstate.State,
+	config Config,
+) error {
+	if config.Stage != Production {
+		return errors.New("checkpoint-copy repair is only valid for production")
+	}
+	if err := ensureProductionInitialCheckpoint(backend, layout, latest, session, latestState, config); err != nil {
+		return err
+	}
+	if err := ensureProductionBestCheckpoint(backend, layout, latest, session, latestState, config); err != nil {
+		return err
+	}
+	return nil
+}
+
+func ensureProductionInitialCheckpoint(backend compute.Backend, layout runstate.Layout, latest checkpointSource, session *supervised.Session, latestState runstate.State, config Config) error {
+	initial, err := loadCheckpointStateFromDir(backend, session, layout.InitialCheckpointDir, config)
+	if err == nil && isInitialCheckpointState(initial, config) {
+		return nil
+	}
+	if latestState.GlobalUpdate != 0 {
+		if err != nil {
+			return fmt.Errorf("initial checkpoint is unavailable after update %d: %w", latestState.GlobalUpdate, err)
+		}
+		return fmt.Errorf("initial checkpoint state %+v is invalid after update %d", initial, latestState.GlobalUpdate)
+	}
+	if err := copyLatestCheckpointAtomically(latest, layout.InitialCheckpointDir); err != nil {
+		return fmt.Errorf("repair initial checkpoint from update-zero latest: %w", err)
+	}
+	initial, err = loadCheckpointStateFromDir(backend, session, layout.InitialCheckpointDir, config)
+	if err != nil {
+		return fmt.Errorf("verify repaired initial checkpoint: %w", err)
+	}
+	if !isInitialCheckpointState(initial, config) {
+		return fmt.Errorf("repaired initial checkpoint state %+v is invalid", initial)
+	}
+	return nil
+}
+
+func ensureProductionBestCheckpoint(backend compute.Backend, layout runstate.Layout, latest checkpointSource, session *supervised.Session, latestState runstate.State, config Config) error {
+	best, err := loadCheckpointStateFromDir(backend, session, layout.BestCheckpointDir, config)
+	if err == nil && bestCheckpointMatchesLatestState(best, latestState) {
+		return nil
+	}
+	if latestState.BestValidation == nil || latestState.BestValidation.Update != latestState.GlobalUpdate {
+		expected := int64(-1)
+		if latestState.BestValidation != nil {
+			expected = latestState.BestValidation.Update
+		}
+		if err != nil {
+			return fmt.Errorf("best checkpoint is unavailable and latest update %d is not the recorded best update %d: %w", latestState.GlobalUpdate, expected, err)
+		}
+		return fmt.Errorf("best checkpoint state %+v differs from latest recorded best at update %d", best, expected)
+	}
+	if err := copyLatestCheckpointAtomically(latest, layout.BestCheckpointDir); err != nil {
+		return fmt.Errorf("repair best checkpoint from latest update %d: %w", latestState.GlobalUpdate, err)
+	}
+	best, err = loadCheckpointStateFromDir(backend, session, layout.BestCheckpointDir, config)
+	if err != nil {
+		return fmt.Errorf("verify repaired best checkpoint: %w", err)
+	}
+	if !bestCheckpointMatchesLatestState(best, latestState) {
+		return fmt.Errorf("repaired best checkpoint state %+v differs from latest recorded best", best)
+	}
+	return nil
+}
+
+func loadCheckpointStateFromDir(backend compute.Backend, session *supervised.Session, directory string, config Config) (runstate.State, error) {
+	restored, err := supervised.New(supervised.Config{Policy: session.Policy.Config(), LearningRate: config.LearningRate, Seed: config.Seed}, backend)
+	if err != nil {
+		return runstate.State{}, fmt.Errorf("create checkpoint verifier session: %w", err)
+	}
+	defer restored.Finalize()
+	if _, err := supervised.NewCheckpoint(restored.Store, directory); err != nil {
+		return runstate.State{}, fmt.Errorf("open checkpoint directory %q: %w", directory, err)
+	}
+	state, err := runstate.LoadCheckpointState(restored.Store)
+	if err != nil {
+		return runstate.State{}, fmt.Errorf("load checkpoint state from %q: %w", directory, err)
+	}
+	return state, nil
+}
+
+func isInitialCheckpointState(state runstate.State, config Config) bool {
+	return state.GlobalUpdate == 0 && state.ShuffleSeed == config.Seed && state.BestValidation != nil && state.BestValidation.Update == 0
+}
+
+func bestCheckpointMatchesLatestState(best, latest runstate.State) bool {
+	return latest.BestValidation != nil &&
+		best.GlobalUpdate == latest.BestValidation.Update &&
+		best.ShuffleSeed == latest.ShuffleSeed &&
+		best.BestValidation != nil &&
+		best.BestValidation.Update == latest.BestValidation.Update &&
+		best.BestValidation.Value == latest.BestValidation.Value
+}
+
+// validateFiniteTrainableParameters guards the initial checkpoint and resumed
+// checkpoints, where optimizer diagnostics are unavailable until a new update
+// has run.  Per-update diagnostics continue to enforce the same invariant
+// during training.
+func validateFiniteTrainableParameters(store *model.Store) error {
+	if store == nil {
+		return errors.New("parameter Store is nil")
+	}
+	trainable := 0
+	for variable := range store.IterVariables() {
+		if !variable.Trainable {
+			continue
+		}
+		trainable++
+		values, err := tensors.CopyFlatData[float32](variable.MustValue())
+		if err != nil {
+			return fmt.Errorf("read trainable parameter %q: %w", variable.Path(), err)
+		}
+		for index, value := range values {
+			if !finite32(value) {
+				return fmt.Errorf("trainable parameter %q value %d is non-finite: %v", variable.Path(), index, value)
+			}
+		}
+	}
+	if trainable == 0 {
+		return errors.New("Store has no trainable parameters to validate")
 	}
 	return nil
 }
@@ -1211,17 +1535,80 @@ func writeFinalMetrics(layout runstate.Layout, result Result) error {
 	return nil
 }
 
-func loadPriorResult(layout runstate.Layout) (Result, error) {
-	contents, err := os.ReadFile(layout.FinalMetricsPath)
+// loadPriorResult accepts final metrics only when they belong to the exact
+// latest checkpoint. Production checkpoints have an additional small journal
+// written before the checkpoint itself: it is used only to repair the crash
+// window after checkpoint publication and before final-metrics publication.
+// A journal from a later, uncheckpointed update is deliberately never used.
+func loadPriorResult(layout runstate.Layout, state runstate.State, allowCheckpointProgress bool) (Result, bool, error) {
+	final, finalErr := loadResultFile(layout.FinalMetricsPath, "prior proof result")
+	if finalErr == nil && final.GlobalUpdate == state.GlobalUpdate {
+		if allowCheckpointProgress {
+			if err := validateProductionProgressIdentity(final, state); err != nil {
+				return Result{}, false, fmt.Errorf("validate production final metrics identity: %w", err)
+			}
+		}
+		return final, false, nil
+	}
+	if !allowCheckpointProgress {
+		if finalErr != nil {
+			return Result{}, false, finalErr
+		}
+		return Result{}, false, fmt.Errorf("prior final metrics update %d differs from checkpoint state update %d", final.GlobalUpdate, state.GlobalUpdate)
+	}
+	contents, err := layout.LoadCheckpointProgress()
 	if err != nil {
-		return Result{}, fmt.Errorf("read prior proof result %q: %w", layout.FinalMetricsPath, err)
+		if finalErr != nil {
+			return Result{}, false, fmt.Errorf("%v; load matching checkpoint progress: %w", finalErr, err)
+		}
+		return Result{}, false, fmt.Errorf("prior final metrics update %d differs from checkpoint state update %d and checkpoint progress is unavailable: %w", final.GlobalUpdate, state.GlobalUpdate, err)
+	}
+	var progress Result
+	if err := json.Unmarshal(contents, &progress); err != nil {
+		return Result{}, false, fmt.Errorf("decode checkpoint progress %q: %w", layout.CheckpointProgressPath, err)
+	}
+	if progress.GlobalUpdate != state.GlobalUpdate {
+		return Result{}, false, fmt.Errorf("checkpoint progress update %d differs from checkpoint state update %d", progress.GlobalUpdate, state.GlobalUpdate)
+	}
+	if !progress.InitialValidation.Finite() {
+		return Result{}, false, fmt.Errorf("checkpoint progress %q lacks a finite step-zero validation result", layout.CheckpointProgressPath)
+	}
+	if err := validateProductionProgressIdentity(progress, state); err != nil {
+		return Result{}, false, fmt.Errorf("validate checkpoint progress identity: %w", err)
+	}
+	return progress, true, nil
+}
+
+func validateProductionProgressIdentity(result Result, state runstate.State) error {
+	if result.Stage != Production {
+		return fmt.Errorf("stage %q is not production", result.Stage)
+	}
+	if result.GlobalUpdate != state.GlobalUpdate {
+		return fmt.Errorf("progress update %d differs from checkpoint state update %d", result.GlobalUpdate, state.GlobalUpdate)
+	}
+	if state.BestValidation == nil {
+		return errors.New("checkpoint state lacks best validation")
+	}
+	if result.BestValidationStep != state.BestValidation.Update || result.BestValidation.Loss != state.BestValidation.Value {
+		return fmt.Errorf("progress best validation update/loss %d/%g differs from checkpoint state %d/%g", result.BestValidationStep, result.BestValidation.Loss, state.BestValidation.Update, state.BestValidation.Value)
+	}
+	if err := validateProductionSafetyProgress(result.ProductionSafety, state.GlobalUpdate); err != nil {
+		return err
+	}
+	return nil
+}
+
+func loadResultFile(path, description string) (Result, error) {
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		return Result{}, fmt.Errorf("read %s %q: %w", description, path, err)
 	}
 	var result Result
 	if err := json.Unmarshal(contents, &result); err != nil {
-		return Result{}, fmt.Errorf("decode prior proof result %q: %w", layout.FinalMetricsPath, err)
+		return Result{}, fmt.Errorf("decode %s %q: %w", description, path, err)
 	}
 	if !result.InitialValidation.Finite() {
-		return Result{}, fmt.Errorf("prior proof result %q lacks a finite step-zero validation result", layout.FinalMetricsPath)
+		return Result{}, fmt.Errorf("%s %q lacks a finite step-zero validation result", description, path)
 	}
 	return result, nil
 }

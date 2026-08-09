@@ -91,6 +91,30 @@ func TestOptionsRejectSealedTestLikeMode(t *testing.T) {
 	}
 }
 
+func TestReadConfigRequiresExactFixedConfiguration(t *testing.T) {
+	layout, err := runstate.Create(t.TempDir(), "production")
+	if err != nil {
+		t.Fatal(err)
+	}
+	production, err := proofrun.ConfigFor(proofrun.Production)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := layout.WriteConfig(production); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := ReadConfig(layout); err != nil || got != production {
+		t.Fatalf("ReadConfig() = %#v, %v; want %#v, nil", got, err, production)
+	}
+	production.TargetUpdates--
+	if err := layout.WriteConfig(production); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadConfig(layout); err == nil {
+		t.Fatal("ReadConfig accepted a modified production configuration")
+	}
+}
+
 func TestAllowedStageCheckpointModeCombinations(t *testing.T) {
 	allowed := []struct {
 		stage      proofrun.Stage
@@ -101,6 +125,7 @@ func TestAllowedStageCheckpointModeCombinations(t *testing.T) {
 		{proofrun.Full, Initial, Games100},
 		{proofrun.Full, Best, Games100},
 		{proofrun.Full, Best, Ablations},
+		{proofrun.Production, Best, Games100},
 	}
 	for _, test := range allowed {
 		if err := validateCombination(test.stage, test.checkpoint, test.mode); err != nil {
@@ -112,7 +137,16 @@ func TestAllowedStageCheckpointModeCombinations(t *testing.T) {
 		checkpoint Checkpoint
 		mode       Mode
 	}{
-		{proofrun.Overfit, Initial, Games10}, {proofrun.Overfit, Latest, Games10}, {proofrun.Mini, Initial, Games10}, {proofrun.Full, Latest, Games100}, {proofrun.Full, Best, Games10}, {proofrun.Mini, Best, Ablations},
+		{proofrun.Overfit, Initial, Games10},
+		{proofrun.Overfit, Latest, Games10},
+		{proofrun.Mini, Initial, Games10},
+		{proofrun.Full, Latest, Games100},
+		{proofrun.Full, Best, Games10},
+		{proofrun.Mini, Best, Ablations},
+		{proofrun.Production, Initial, Games100},
+		{proofrun.Production, Latest, Games100},
+		{proofrun.Production, Best, Games10},
+		{proofrun.Production, Best, Ablations},
 	} {
 		if err := validateCombination(test.stage, test.checkpoint, test.mode); err == nil {
 			t.Errorf("%+v unexpectedly allowed", test)
@@ -161,8 +195,8 @@ func TestPersistEvaluationAddsAndPreservesRawEntries(t *testing.T) {
 	}
 }
 
-func TestPersistEvaluationRequiresPassedMiniAndFull(t *testing.T) {
-	for _, stage := range []proofrun.Stage{proofrun.Mini, proofrun.Full} {
+func TestPersistEvaluationRequiresPassedCompletedTraining(t *testing.T) {
+	for _, stage := range []proofrun.Stage{proofrun.Mini, proofrun.Full, proofrun.Production} {
 		layout, err := runstate.Create(t.TempDir(), "proof-"+string(stage))
 		if err != nil {
 			t.Fatal(err)
@@ -177,22 +211,26 @@ func TestPersistEvaluationRequiresPassedMiniAndFull(t *testing.T) {
 }
 
 func TestEvaluationPreflightRejectsUnpassedTrainingWithoutArtifacts(t *testing.T) {
-	layout, err := runstate.Create(t.TempDir(), "unpassed-mini")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := layout.WriteFinalMetricsJSON(proofrun.Result{Stage: proofrun.Mini, Passed: false}); err != nil {
-		t.Fatal(err)
-	}
-	if err := validateEvaluationTrainingComplete(layout, proofrun.Mini); err == nil {
-		t.Fatal("unpassed mini evaluation preflight succeeded")
-	}
-	entries, err := os.ReadDir(layout.EvaluationsDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(entries) != 0 {
-		t.Fatalf("unpassed preflight wrote evaluation artifacts: %v", entries)
+	for _, stage := range []proofrun.Stage{proofrun.Mini, proofrun.Production} {
+		t.Run(string(stage), func(t *testing.T) {
+			layout, err := runstate.Create(t.TempDir(), "unpassed-"+string(stage))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := layout.WriteFinalMetricsJSON(proofrun.Result{Stage: stage, Passed: false}); err != nil {
+				t.Fatal(err)
+			}
+			if err := validateEvaluationTrainingComplete(layout, stage); err == nil {
+				t.Fatalf("unpassed %s evaluation preflight succeeded", stage)
+			}
+			entries, err := os.ReadDir(layout.EvaluationsDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(entries) != 0 {
+				t.Fatalf("unpassed preflight wrote evaluation artifacts: %v", entries)
+			}
+		})
 	}
 }
 
@@ -205,9 +243,11 @@ func TestCanonicalReportTrajectorySelection(t *testing.T) {
 	}{
 		{proofrun.Mini, Latest, Games10, true},
 		{proofrun.Full, Best, Games100, true},
+		{proofrun.Production, Best, Games100, true},
 		{proofrun.Overfit, Initial, Games10, false},
 		{proofrun.Full, Initial, Games100, false},
 		{proofrun.Full, Best, Ablations, false},
+		{proofrun.Production, Best, Ablations, false},
 	} {
 		if got := isCanonicalReportTrajectory(test.stage, test.checkpoint, test.mode); got != test.want {
 			t.Errorf("canonical(%s,%s,%s) = %t, want %t", test.stage, test.checkpoint, test.mode, got, test.want)
@@ -226,7 +266,7 @@ func TestSameJSONAcceptsSemanticIdentityOnly(t *testing.T) {
 	}
 }
 
-func TestGameTelemetryIsIdempotentAndRejectsPartialDuplicateOrMismatch(t *testing.T) {
+func TestGameTelemetryIsIdempotentAndRecoversPartialWrites(t *testing.T) {
 	evaluation := proofgames.Evaluation{Summary: gameeval.Summary{SolvedFraction: .5, MeanGuesses: 3, Failures: 5, GuessCountDistribution: [6]int{1, 2, 3, 4, 5, 6}}}
 	t.Run("idempotent", func(t *testing.T) {
 		dir := t.TempDir()
@@ -244,18 +284,42 @@ func TestGameTelemetryIsIdempotentAndRejectsPartialDuplicateOrMismatch(t *testin
 			t.Fatalf("game scalar records = %d, want one set", got)
 		}
 	})
+	t.Run("partial", func(t *testing.T) {
+		dir := t.TempDir()
+		writer, err := tensorboard.New(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		expected := proofgames.TensorBoardScalars(evaluation)
+		if err := writer.WriteScalars(100, expected[0]); err != nil {
+			t.Fatal(err)
+		}
+		if err := writer.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if err := writeGameScalars(dir, 100, evaluation); err != nil {
+			t.Fatalf("recover partial game telemetry: %v", err)
+		}
+		inspection, err := tensorboard.InspectDir(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := countGameRecords(inspection.Scalars, 100); got != len(expected) {
+			t.Fatalf("recovered game scalar records = %d, want %d", got, len(expected))
+		}
+	})
 	for _, test := range []struct {
 		name  string
 		write func(*tensorboard.Writer, []tensorboard.Scalar) error
 	}{
-		{"partial", func(writer *tensorboard.Writer, expected []tensorboard.Scalar) error {
-			return writer.WriteScalars(100, expected[0])
-		}},
 		{"duplicate", func(writer *tensorboard.Writer, expected []tensorboard.Scalar) error {
 			return writer.WriteScalars(100, expected[0], expected[0])
 		}},
 		{"mismatch", func(writer *tensorboard.Writer, expected []tensorboard.Scalar) error {
 			return writer.WriteScalars(100, tensorboard.Scalar{Tag: expected[0].Tag, Value: expected[0].Value + 1})
+		}},
+		{"non-finite", func(writer *tensorboard.Writer, expected []tensorboard.Scalar) error {
+			return writer.WriteScalars(100, tensorboard.Scalar{Tag: expected[0].Tag, Value: float32(math.NaN())})
 		}},
 	} {
 		t.Run(test.name, func(t *testing.T) {

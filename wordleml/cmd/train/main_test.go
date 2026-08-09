@@ -7,7 +7,7 @@ import (
 )
 
 func TestParseConfigRequiresFixedRunIdentityAndStage(t *testing.T) {
-	for _, args := range [][]string{nil, {"-run-id=proof"}, {"-stage=mini"}, {"-run-id=proof", "-stage=unknown"}} {
+	for _, args := range [][]string{nil, {"-run-id=proof"}, {"-stage=mini"}, {"-run-id=proof", "-stage=unknown"}, {"-run-id=production", "-stage=production"}} {
 		var stderr bytes.Buffer
 		if _, err := parseConfig(args, &stderr); err == nil {
 			t.Errorf("parseConfig(%q) succeeded", args)
