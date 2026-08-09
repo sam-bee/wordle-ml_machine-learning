@@ -140,8 +140,22 @@ training, safety checks, checkpoint reload, validation, or gameplay stops this
 chain and leaves a clear failure status and logs; it does not silently retry
 with changed settings.
 
-The final-test split remains sealed throughout. `cmd/production` neither opens
-nor evaluates it, and the production report is a validation-only comparison.
+The final-test split remains sealed throughout. `cmd/production` neither loads
+final-test examples nor evaluates them, and the production report is a
+validation-only comparison.
+
+## Completed first production run
+
+The generated [production training report](production-training-report.md)
+records the completed `production-20260809-005026Z` run. Training reached all
+10,000 fixed updates with finite loss, gradients, and parameters; independent
+reload selected update 2,200 and reproduced its validation metrics within the
+declared tolerance. Compared with the retained proof best, validation loss
+improved from 3.1633 to 3.1341 and top-1 rose from 0.5008 to 0.5100. Both
+checkpoints solved 97/100 validation games, while mean guesses changed from
+3.65 to 3.68. This small validation-metric improvement did not improve the
+game solved fraction and is not a generalization claim. No final-test examples
+were loaded or evaluated.
 
 ## Completed initial proof
 

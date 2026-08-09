@@ -108,7 +108,13 @@ docker compose run --rm --no-deps wordleml go run ./cmd/production -run-id=<time
 It fixes the existing full training split, policy/encoder/objective and
 opening-state sampling for 10,000 updates, then independently validates the
 best checkpoint and plays all 100 validation games. It writes the separate
-validation-only comparison report to `docs/ml/production-training-report.md`;
+validation-only comparison report to
+[`docs/ml/production-training-report.md`](docs/ml/production-training-report.md).
+
+The completed first run, `production-20260809-005026Z`, selected update 2,200:
+validation loss improved from the retained proof's 3.1633 to 3.1341, while
+both checkpoints solved 97/100 validation games and mean guesses changed from
+3.65 to 3.68. This is a validation-only result, not a generalization claim;
 the final-test split remains sealed. See
 [`docs/ml/supervised-training.md`](docs/ml/supervised-training.md) for fixed
 configuration, resume, and handoff details.

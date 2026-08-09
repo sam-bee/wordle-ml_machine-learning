@@ -104,20 +104,25 @@ gradually and keep the Wordle problem visible throughout, rather than turning in
   the fixed validation games versus 4/100 at initialization, reducing mean
   guesses from 5.86 to 3.65. Present this as a bounded proof result, not a
   generalization claim: validation guides choices and final test stays sealed.
-- Follow the proof with one fresh, fixed production continuation: the same
+- The proof was followed by one fresh, fixed production continuation: the same
   full training split, encoder, policy, objective, opening-state sampling,
-  seed, optimizer, batch size, learning rate, and clipping; the only planned
-  difference is the 10,000-update budget. That is a longer confirmation run,
-  not a hyperparameter search or a retroactive change to the proof.
+  seed, optimizer, batch size, learning rate, and clipping; the only
+  configuration difference was the 10,000-update budget. That was a longer
+  confirmation run, not a hyperparameter search or a retroactive change to
+  the proof.
 - Explain the production handoff in engineering terms: immutable provenance;
   initial/latest/best checkpoints; complete optimizer and sampler resume
   state; telemetry every 10 updates; validation and latest snapshots every
   100; numerical-safety checks; and a separate post-training reload before
   all 100 validation games are played.
-- When its generated production report exists, compare its best checkpoint
-  with the retained 2,000-update proof best on validation loss/top-k agreement
-  and solved fraction/mean guesses/guess distribution. Do not prestate the
-  result, turn validation into a generalization claim, or open the final test.
+- The [production report](../docs/ml/production-training-report.md) selected
+  update 2,200 from the 10,000-update run. Against the retained proof best,
+  validation loss improved from 3.1633 to 3.1341 and top-1/top-5/top-16 moved
+  from 0.5008/0.6052/0.6596 to 0.5100/0.6108/0.6640. Both solved 97/100
+  validation games; mean guesses rose slightly from 3.65 to 3.68. That contrast
+  is a useful lesson: a small validation metric improvement did not improve
+  this gameplay success rate. Keep the claim validation-only and the final
+  test sealed.
 - For the live demo, select a validation solution in the web application. Its
   Go server proxies one same-origin request to the internal inference service;
   the Go host advances the authoritative game and encodes each state, while up

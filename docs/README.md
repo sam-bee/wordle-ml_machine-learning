@@ -13,9 +13,9 @@ Current project documentation:
   completed initial supervised-training proof, with a link to its report.
 - [`ml/initial-training-proof-report.md`](ml/initial-training-proof-report.md) is the generated evidence from the
   completed fixed validation proof.
-- `ml/production-training-report.md` is the separate, generated validation-only comparison for the first fixed
-  production run; it is written only after that run and its post-training checks complete successfully.
-- [`project-plan/next-steps.md`](project-plan/next-steps.md) records the approved fixed production continuation and
+- [`ml/production-training-report.md`](ml/production-training-report.md) is the generated validation-only comparison
+  from the completed first fixed production run.
+- [`project-plan/next-steps.md`](project-plan/next-steps.md) records the completed fixed production continuation and
   subsequent review boundary;
   [`project-plan/codex-initial-training-proof-plan.md`](project-plan/codex-initial-training-proof-plan.md) records
   the implementation requirements and proof gates used for that run.
