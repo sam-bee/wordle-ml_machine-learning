@@ -93,3 +93,22 @@ report with the stopping reason, without replacing an existing successful
 report.
 The final-test split remains sealed: neither training nor evaluation offers a
 test-split mode.
+
+## Fixed production run
+
+The first production run is deliberately separate from the retained proof
+stages. After `make format`, `make test`, and `make smoke` have passed and the
+implementation is committed and pushed, start it from initialization with a
+fresh timestamped ID:
+
+```console
+docker compose run --rm --no-deps wordleml go run ./cmd/production -run-id=<timestamped-id>
+```
+
+It fixes the existing full training split, policy/encoder/objective and
+opening-state sampling for 10,000 updates, then independently validates the
+best checkpoint and plays all 100 validation games. It writes the separate
+validation-only comparison report to `docs/ml/production-training-report.md`;
+the final-test split remains sealed. See
+[`docs/ml/supervised-training.md`](docs/ml/supervised-training.md) for fixed
+configuration, resume, and handoff details.

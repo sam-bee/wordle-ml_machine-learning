@@ -72,6 +72,77 @@ still produces a clearly marked incomplete report naming the stopped stage and
 reason while the command returns an error; it does not overwrite an existing
 successful report.
 
+## Fixed production workflow
+
+The completed proof is retained as evidence that the training and evaluation
+path works. It is not changed, rerun in place, or treated as a checkpoint to
+continue from. The separate production command starts a fresh model from
+initialization with a new timestamped production ID:
+
+```console
+docker compose run --rm --no-deps wordleml go run ./cmd/production -run-id=<timestamped-id>
+```
+
+`cmd/production` has one fixed configuration, rather than a tunable training
+framework. It uses only the frozen full training split and the existing policy
+architecture, state encoder, opening-state sampling, masked sparse
+cross-entropy against teacher top-1, FP32 Adam, constant learning rate
+`0.0003`, global-gradient-norm clipping at `5`, and seed `20260808`. Its batch
+size is `256`, target is `10,000` updates, scalar telemetry is emitted every
+10 updates, and validation plus the latest checkpoint are written every 100
+updates. A new named best checkpoint is published whenever validation loss
+improves.
+
+The proof stages `overfit`, `mini`, and `full` keep their existing meanings
+and fixed configurations. In particular, the proof `full` stage still stops
+at 2,000 updates; that proof-only gate is not applied to this production run.
+Do not overwrite its run directory, checkpoints, TensorBoard events, or
+[`initial training proof report`](initial-training-proof-report.md).
+
+Before starting a production run, run the normal containerised preflight in
+order and stop if any command fails:
+
+```console
+make format
+make test
+make smoke
+```
+
+Commit and push the resulting implementation before launch, then confirm that
+the working tree is clean. The immutable production metadata records that
+committed machine-learning revision together with the dependency commits,
+dataset and vocabulary hashes, effective configuration, and CUDA/PJRT runtime
+identity.
+
+The production run is resumable. If it is interrupted, invoke the same command
+with the same production ID; it validates the immutable run identity and
+resumes from the latest complete checkpoint, including optimizer and sampler
+state. Do not start a second run with that ID and do not import a proof
+checkpoint. A run directory keeps `config.json`, `metadata.json`,
+`run-state.json`, the crash-consistent `checkpoint-progress.json`,
+`training.log`, `events/`,
+`checkpoints/{initial,latest,best}`, validation snapshots, and an atomically
+published `final-metrics.json`. These artifacts include finite-loss,
+finite-gradient, and finite-parameter safety checks. For a running handoff,
+inspect `runs/<timestamped-id>.status.json` and
+`runs/<timestamped-id>/run-state.json`, follow
+`runs/<timestamped-id>/training.log`, or point TensorBoard at
+`runs/<timestamped-id>/events`.
+
+Only after all 10,000 updates complete successfully, the command independently
+reloads the best checkpoint, reproduces its validation metrics, and plays all
+100 frozen validation games. It retains the trajectories, solved fraction,
+mean guesses, failures, and guess-count distribution alongside the validation
+artifacts. It then atomically writes the separate default production report at
+`docs/ml/production-training-report.md`, comparing the production best
+checkpoint with the retained `proof-full-20260808` best checkpoint. Failure in
+training, safety checks, checkpoint reload, validation, or gameplay stops this
+chain and leaves a clear failure status and logs; it does not silently retry
+with changed settings.
+
+The final-test split remains sealed throughout. `cmd/production` neither opens
+nor evaluates it, and the production report is a validation-only comparison.
+
 ## Completed initial proof
 
 The generated [initial training proof report](initial-training-proof-report.md)
