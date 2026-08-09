@@ -127,14 +127,16 @@ guesses. To refresh it:
      MODEL_DIR=runs/seed-replication-20260809-132505Z/exports/cuda-f32-v1/best
    ```
 
-2. Open <http://127.0.0.1:8083>, choose one advertised validation solution,
-   and run a complete game. Do not select or show final-test data.
+2. Open <http://127.0.0.1:8083>, type `ADEPT` (or another canonical solution)
+   into the free-text field, and run a complete game. The direct process does
+   not load final-test split membership; do not present an interactive game as
+   validation or final-test evidence.
 3. Wait until the page displays the completed board and keep these real UI
    fields in the crop: `Inference backend: hand-written CUDA via cgo`, the
    `cuda-cgo` status, model run/checkpoint/update, and GPU/device identity.
 4. Replace `talk/assets/cuda-cgo/browser-demo.png` only after checking that the
    visible backend/device information belongs to the same running demo and the
-   completed trajectory is for an advertised validation word.
+   completed trajectory is for the canonical word typed into the field.
 
 The direct demo at port 8083 is one Go process. Do not use a screenshot from
 the retained port-8082 GoMLX/XLA proxy visualiser as evidence of the cgo route.

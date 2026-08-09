@@ -185,7 +185,7 @@ cuda-cgo-bench: cuda-cgo-dependency-audit
 		-warmup=$(CUDA_BENCH_WARMUP) -iterations=$(CUDA_BENCH_ITERATIONS)
 
 cuda-cgo-demo: cuda-cgo-build
-	CUDA_CGO_MODEL_DIR=$(CUDA_MODEL_DIR) docker compose up -d --no-deps cudaweb
+	CUDA_CGO_MODEL_DIR=$(CUDA_MODEL_DIR) docker compose up -d --no-deps --force-recreate cudaweb
 
 cuda-cgo-demo-logs:
 	docker compose logs --follow cudaweb

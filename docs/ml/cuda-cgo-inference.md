@@ -201,10 +201,21 @@ matter materially at this size.
 
 The direct demo listens on <http://127.0.0.1:8083>. It warms one opening
 position, exposes `GET /healthz`, `GET`/`PUT /api/models`, `GET /api/solutions`,
-and `POST /api/games`, and accepts only the 100 validation solutions. The UI
-shows `Inference backend: hand-written CUDA via cgo`, model identity, and GPU
-identity. It does not hot-swap models or proxy browser calls to a separate
-process. The retained GoMLX visualiser remains at port 8082.
+and `POST /api/games`. `GET /api/solutions` returns the 2,309-word canonical
+solution vocabulary, and the UI accepts any one of those words through a plain
+text field. The server remains authoritative: malformed or non-canonical words
+are rejected. The UI shows `Inference backend: hand-written CUDA via cgo`,
+model identity, and GPU identity. It does not hot-swap models or proxy browser
+calls to a separate process. The retained GoMLX visualiser remains at port
+8082.
+
+This interactive choice deliberately extends beyond the 100 validation words.
+`cudaweb` still uses `vocabulary.LoadWithoutFinalTest`, so it never opens the
+separate final-test split file or learns which canonical words belong to that
+split. A user-directed game may nevertheless name a word from the all-solutions
+vocabulary that happens to be held out. Treat those games only as demo output:
+the golden-vector parity gate, 100-game trajectory check, and reported metrics
+above remain validation-only evidence.
 
 Audit the direct runtime after building it from inside the development
 container:

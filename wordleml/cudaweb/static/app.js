@@ -2,7 +2,7 @@
 
 const form = document.querySelector("#game-form");
 const modelSelect = document.querySelector("#model");
-const solutionSelect = document.querySelector("#solution");
+const solutionInput = document.querySelector("#solution");
 const playButton = document.querySelector("#play-button");
 const message = document.querySelector("#message");
 const gameResult = document.querySelector("#game-result");
@@ -16,6 +16,7 @@ const deviceIdentity = document.querySelector("#device-identity");
 let activeRunID = "";
 let activeRuntime = {};
 let controlsReady = false;
+let playableSolutions = new Set();
 
 function setMessage(text, isError = false) {
   message.textContent = text;
@@ -53,7 +54,7 @@ function showModel(model, runtime = activeRuntime) {
 
 function setControlsDisabled(disabled) {
   modelSelect.disabled = disabled || !controlsReady;
-  solutionSelect.disabled = disabled || !controlsReady;
+  solutionInput.disabled = disabled || !controlsReady;
   playButton.disabled = disabled || !controlsReady;
 }
 
@@ -84,20 +85,15 @@ async function loadPage() {
     activeRunID = modelsPayload.active.run_id;
     modelSelect.value = activeRunID;
 
-    solutionSelect.replaceChildren();
-    for (const solution of solutionsPayload.solutions) {
-      const option = document.createElement("option");
-      option.value = solution;
-      option.textContent = solution;
-      solutionSelect.append(option);
-    }
+    playableSolutions = new Set(solutionsPayload.solutions);
+    if (!playableSolutions.size) throw new Error("No canonical solutions are available");
     activeRuntime = modelsPayload.runtime || health.runtime || {};
     runtimeStatus.textContent = activeRuntime.backend === "cuda-cgo" ? "CUDA inference ready" : "Inference ready";
     showModel(modelsPayload.active, activeRuntime);
     statusDot.classList.remove("loading", "error");
     controlsReady = true;
     setControlsDisabled(false);
-    setMessage("Choose a validation solution, then run a complete game.");
+    setMessage("Type any canonical solution, then run a complete game.");
   } catch (error) {
     runtimeStatus.textContent = "Inference unavailable";
     statusDot.classList.remove("loading");
@@ -175,14 +171,26 @@ async function animateGame(game) {
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
+  const solution = solutionInput.value.trim().toUpperCase();
+  solutionInput.value = solution;
+  if (!/^[A-Z]{5}$/.test(solution)) {
+    setMessage("Enter one five-letter solution word.", true);
+    solutionInput.focus();
+    return;
+  }
+  if (!playableSolutions.has(solution)) {
+    setMessage(`${solution} is not one of the 2,309 canonical solution words.`, true);
+    solutionInput.focus();
+    return;
+  }
   setControlsDisabled(true);
   gameResult.hidden = true;
-  setMessage(`Running CUDA inference for ${solutionSelect.value}…`);
+  setMessage(`Running CUDA inference for ${solution}…`);
   try {
     const response = await fetch("/api/games", {
       method: "POST",
       headers: {"Content-Type": "application/json", Accept: "application/json"},
-      body: JSON.stringify({solution: solutionSelect.value}),
+      body: JSON.stringify({solution}),
     });
     const game = await responseJSON(response);
     activeRunID = game.model.run_id;

@@ -45,7 +45,7 @@ func (adapter servingServiceAdapter) ModelIdentity() inferenceapi.ModelIdentity 
 	return apiModelIdentity(adapter.service.ModelIdentity())
 }
 
-func (adapter servingServiceAdapter) ValidationSolutions() []string {
+func (adapter servingServiceAdapter) PlayableSolutions() []string {
 	return adapter.service.ValidationSolutions()
 }
 

@@ -70,10 +70,16 @@ only the fixed validation list is exposed or accepted.
 `make cuda-cgo-demo MODEL_DIR=<export-dir>` starts `cudaweb` at
 <http://127.0.0.1:8083>. Unlike this retained route, one Go process owns the
 browser UI, HTTP endpoints, Wordle engine, state encoding, Go-side
-availability mask, and a single locked cgo/CUDA worker. It accepts only the
-fixed validation solutions and exposes one immutable exported model; its
-`PUT /api/models` endpoint is idempotent for that model and rejects other
-IDs. No browser request is proxied to an inference process.
+availability mask, and a single locked cgo/CUDA worker. Its free-text input
+accepts every word in the 2,309-word canonical solution vocabulary, while the
+server rejects malformed or non-canonical words. It exposes one immutable
+exported model; its `PUT /api/models` endpoint is idempotent for that model and
+rejects other IDs. No browser request is proxied to an inference process.
+
+The CUDA/cgo process still loads the vocabulary without the separate final-test
+split file or its membership. Because the canonical vocabulary spans all
+splits, interactive games are demonstrations rather than validation or
+final-test evidence. The retained GoMLX route above remains validation-only.
 
 `GET /healthz` and the model API identify `backend: "cuda-cgo"`, model
 format/run/checkpoint/update/training commit/weight hash/parameter count, and

@@ -49,7 +49,9 @@ a versioned, hash-checked FP32 artifact, then starts one Go process on port
 8083. That process serves the same style of browser UI and calls CUDA through
 cgo directly—there is no HTTP proxy to a second inference service. It keeps
 Wordle rules, state encoding, legality filtering, and tie-breaking in Go; CUDA
-returns raw logits only.
+returns raw logits only. Its free-text field accepts any of the 2,309 canonical
+solution words rather than limiting the interactive demo to the validation
+picker used at port 8082.
 
 ```console
 make cuda-cgo-export RUN_ID=seed-replication-20260809-132505Z CHECKPOINT=best
@@ -60,7 +62,9 @@ Open <http://127.0.0.1:8083> after the demo service is healthy. See
 [`docs/ml/cuda-cgo-inference.md`](docs/ml/cuda-cgo-inference.md) for the
 artifact contract, verification, profiling, and command sequence. The existing
 GoMLX training and port-8082 serving path remain available as the reference and
-fallback route.
+fallback route. The direct demo still never loads the separate final-test split
+file or its membership; user-directed games are demonstrations, not evaluation
+evidence.
 
 Proof runs write scalar and histogram events under `runs/<run-id>/events`, which TensorBoard discovers beneath
 `runs/`. See

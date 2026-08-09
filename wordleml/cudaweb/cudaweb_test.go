@@ -17,7 +17,7 @@ import (
 	"github.com/sam-bee/wordle-ml_machine-learning/vocabulary"
 )
 
-func TestHandlerServesOneModelAndCompleteValidationGames(t *testing.T) {
+func TestHandlerServesOneModelAndCanonicalSolutionGames(t *testing.T) {
 	service, backend := newTestService(t, nil)
 	handler, err := NewHandler(service)
 	if err != nil {
@@ -48,10 +48,16 @@ func TestHandlerServesOneModelAndCompleteValidationGames(t *testing.T) {
 
 	solutions := getJSON(t, handler, "/api/solutions")
 	values := solutions["solutions"].([]any)
-	if len(values) != vocabulary.NumValidationSolutions {
-		t.Fatalf("solutions length = %d, want %d", len(values), vocabulary.NumValidationSolutions)
+	if len(values) != vocabulary.NumSolutions {
+		t.Fatalf("solutions length = %d, want %d", len(values), vocabulary.NumSolutions)
 	}
-	solution := values[0].(string)
+	// A training word proves the direct demo is no longer restricted to the
+	// validation population. This vocabulary was loaded without the final-test
+	// split, so the test does not inspect or derive that split's membership.
+	solution := testVocabulary(t).Training()[0]
+	if !containsJSONWord(values, solution) {
+		t.Fatalf("canonical solution catalogue does not contain training word %q", solution)
+	}
 
 	request := httptest.NewRequest(http.MethodPut, "/api/models", strings.NewReader(`{"run_id":"seed-replication-20260809-132505Z"}`))
 	request.Header.Set("Content-Type", "application/json")
@@ -69,7 +75,7 @@ func TestHandlerServesOneModelAndCompleteValidationGames(t *testing.T) {
 		t.Fatalf("unknown model status = %d body=%s", response.Code, response.Body.String())
 	}
 
-	request = httptest.NewRequest(http.MethodPost, "/api/games", strings.NewReader(`{"solution":"`+solution+`"}`))
+	request = httptest.NewRequest(http.MethodPost, "/api/games", strings.NewReader(`{"solution":"`+strings.ToLower(solution)+`"}`))
 	request.Header.Set("Content-Type", "application/json")
 	response = httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
@@ -92,15 +98,27 @@ func TestHandlerServesOneModelAndCompleteValidationGames(t *testing.T) {
 	response = httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusBadRequest {
-		t.Fatalf("non-validation solution status = %d body=%s", response.Code, response.Body.String())
+		t.Fatalf("non-canonical solution status = %d body=%s", response.Code, response.Body.String())
 	}
 
 	request = httptest.NewRequest(http.MethodGet, "/", nil)
 	response = httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "hand-written CUDA via cgo") {
+	if response.Code != http.StatusOK ||
+		!strings.Contains(response.Body.String(), "hand-written CUDA via cgo") ||
+		!strings.Contains(response.Body.String(), `type="text"`) ||
+		strings.Contains(response.Body.String(), `<select id="solution"`) {
 		t.Fatalf("UI status=%d body=%q", response.Code, response.Body.String())
 	}
+}
+
+func containsJSONWord(values []any, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestPlaySerializesWholeGamesAndHonorsQueuedCancellation(t *testing.T) {
@@ -117,7 +135,7 @@ func TestPlaySerializesWholeGamesAndHonorsQueuedCancellation(t *testing.T) {
 		})
 		return nil
 	})
-	solution := service.ValidationSolutions()[0]
+	solution := service.PlayableSolutions()[0]
 
 	firstDone := make(chan error, 1)
 	go func() {

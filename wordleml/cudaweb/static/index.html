@@ -31,8 +31,8 @@
       <section class="play-panel" aria-labelledby="play-heading">
         <div class="controls">
           <div>
-            <p class="section-label">Validation game</p>
-            <h2 id="play-heading">Pick the hidden solution</h2>
+            <p class="section-label">Canonical Wordle game</p>
+            <h2 id="play-heading">Type the hidden solution</h2>
           </div>
           <form id="game-form">
             <div class="form-row">
@@ -44,9 +44,10 @@
               </div>
               <div class="form-field solution-field">
                 <label for="solution">Solution</label>
-                <select id="solution" name="solution" disabled>
-                  <option>Loading validation words…</option>
-                </select>
+                <input id="solution" name="solution" type="text" inputmode="text"
+                  autocomplete="off" autocapitalize="characters" spellcheck="false"
+                  minlength="5" maxlength="5" pattern="[A-Za-z]{5}" placeholder="ADEPT"
+                  title="Any canonical five-letter solution" required disabled>
               </div>
               <button id="play-button" type="submit" disabled>Run inference</button>
             </div>
@@ -67,8 +68,8 @@
       </section>
 
       <footer>
-        The endpoint accepts the fixed validation solutions only. The sealed
-        final-test split is not available to this interface.
+        Type any of the 2,309 canonical solution words. The separate final-test
+        split file and its membership are not loaded by this interface.
       </footer>
     </main>
   </body>

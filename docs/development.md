@@ -75,7 +75,9 @@ The existing `inference` plus `web` services above are the retained GoMLX/XLA
 route. The CUDA/cgo route is a distinct one-process service: it loads one
 portable artifact, creates a locked CUDA worker, and serves its browser/API on
 <http://127.0.0.1:8083>. It is the only service that should be described as
-hand-written CUDA via cgo.
+hand-written CUDA via cgo. Its free-text input accepts all 2,309 canonical
+solutions. It does not open the separate final-test split file or learn split
+membership, and interactive games are not evaluation results.
 
 The usual CUDA/cgo sequence is:
 

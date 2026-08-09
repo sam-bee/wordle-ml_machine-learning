@@ -26,9 +26,9 @@ const (
 )
 
 var (
-	// ErrInvalidSolution means a requested solution is outside the fixed
+	// ErrInvalidSolution means a requested solution is outside the playable
 	// population exposed by an inference application.
-	ErrInvalidSolution = errors.New("solution is not an allowed validation word")
+	ErrInvalidSolution = errors.New("solution is not accepted by this inference service")
 	// ErrModelNotFound means the requested model is not exposed by an
 	// inference application.
 	ErrModelNotFound = errors.New("model is not available")
@@ -87,11 +87,11 @@ type GameResponse struct {
 }
 
 // Service is the model-selectable inference surface used by the HTTP API.
-// Implementations own validation-solution restrictions and any backend
+// Implementations own their playable-solution restrictions and any backend
 // serialization; this package only validates HTTP input and maps errors.
 type Service interface {
 	ModelIdentity() ModelIdentity
-	ValidationSolutions() []string
+	PlayableSolutions() []string
 	PlayGame(context.Context, string) (GameResponse, error)
 	AvailableModels() ([]ModelSummary, error)
 	SelectModel(context.Context, string) (ModelIdentity, error)
@@ -147,7 +147,7 @@ func NewHandlerWithOptions(service Service, options HandlerOptions) (http.Handle
 		handleModelSelection(response, request, service)
 	})
 	mux.HandleFunc("GET "+prefix+"/solutions", func(response http.ResponseWriter, _ *http.Request) {
-		payload := map[string]any{"model": service.ModelIdentity(), "solutions": service.ValidationSolutions()}
+		payload := map[string]any{"model": service.ModelIdentity(), "solutions": service.PlayableSolutions()}
 		addRuntimeInfo(payload, service)
 		writeJSON(response, http.StatusOK, payload)
 	})
@@ -194,7 +194,7 @@ func handleGame(response http.ResponseWriter, request *http.Request, service Ser
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrInvalidSolution):
-			writeError(response, http.StatusBadRequest, "solution must be one of the advertised validation words")
+			writeError(response, http.StatusBadRequest, "solution is not accepted by this inference service")
 		case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 			writeError(response, http.StatusGatewayTimeout, "inference request timed out")
 		default:

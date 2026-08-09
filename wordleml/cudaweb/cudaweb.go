@@ -19,8 +19,8 @@ import (
 )
 
 var (
-	// ErrInvalidSolution means a request named a word outside the fixed
-	// validation population. The final-test vocabulary is never exposed here.
+	// ErrInvalidSolution means a request named a word outside the canonical
+	// solution vocabulary exposed by this demo.
 	ErrInvalidSolution = inferenceapi.ErrInvalidSolution
 	// ErrModelNotFound means a request tried to select something other than the
 	// one CUDA model loaded by this process.
@@ -53,7 +53,7 @@ type Model struct {
 }
 
 // Options supplies the already-loaded CUDA scorer and the vocabulary used to
-// encode and play validation-only games.
+// encode and play games with canonical solutions.
 type Options struct {
 	Vocabulary *vocabulary.Vocabulary
 	Scorer     Scorer
@@ -103,12 +103,12 @@ func New(options Options) (*Service, error) {
 	service := &Service{
 		scorer:    options.Scorer,
 		model:     options.Model,
-		solutions: options.Vocabulary.Validation(),
-		allowed:   make(map[string]struct{}, vocabulary.NumValidationSolutions),
+		solutions: options.Vocabulary.Solutions(),
+		allowed:   make(map[string]struct{}, vocabulary.NumSolutions),
 		gate:      make(chan struct{}, 1),
 	}
-	if len(service.solutions) != vocabulary.NumValidationSolutions {
-		return nil, fmt.Errorf("validation population has %d words, want %d", len(service.solutions), vocabulary.NumValidationSolutions)
+	if len(service.solutions) != vocabulary.NumSolutions {
+		return nil, fmt.Errorf("canonical solution population has %d words, want %d", len(service.solutions), vocabulary.NumSolutions)
 	}
 	for _, solution := range service.solutions {
 		service.allowed[solution] = struct{}{}
@@ -164,8 +164,9 @@ func (service *Service) AvailableModels() ([]inferenceapi.ModelSummary, error) {
 	}}, nil
 }
 
-// ValidationSolutions returns only the frozen validation population.
-func (service *Service) ValidationSolutions() []string {
+// PlayableSolutions returns every canonical solution in stable solution-ID
+// order. The vocabulary does not contain final-test split membership.
+func (service *Service) PlayableSolutions() []string {
 	if service == nil {
 		return nil
 	}
@@ -184,7 +185,7 @@ func (service *Service) SelectModel(_ context.Context, runID string) (inferencea
 	return service.ModelIdentity(), nil
 }
 
-// Play validates one hidden validation word then runs its full six-turn game
+// Play validates one hidden canonical solution then runs its full six-turn game
 // while retaining a single game-level gate.
 func (service *Service) PlayGame(ctx context.Context, solution string) (GameResponse, error) {
 	if service == nil || service.evaluator == nil {
@@ -203,7 +204,7 @@ func (service *Service) PlayGame(ctx context.Context, solution string) (GameResp
 
 	evaluation, err := service.evaluator.Evaluate(ctx, []string{solution})
 	if err != nil {
-		return GameResponse{}, fmt.Errorf("play validation game: %w", err)
+		return GameResponse{}, fmt.Errorf("play game: %w", err)
 	}
 	if len(evaluation.Games) != 1 {
 		return GameResponse{}, fmt.Errorf("single-game CUDA inference returned %d games", len(evaluation.Games))

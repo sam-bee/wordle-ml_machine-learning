@@ -129,9 +129,12 @@ gradually and keep the Wordle problem visible throughout, rather than turning in
   GoMLX/XLA service. The direct port-8083 CUDA/cgo demo deliberately differs:
   it serves one exported checkpoint from one Go process, has no HTTP inference
   proxy and no CUDA hot swap, and visibly names the `cuda-cgo` backend and GPU.
-  In either demo, select only an advertised validation solution; the Go host
-  advances the authoritative game and the browser animates the completed
-  trajectory without receiving GPU access.
+  Port 8082 retains its advertised validation picker; at port 8083, type any
+  canonical solution into the free-text field. The direct process does not
+  load final-test split membership, and a user-chosen game is a demo rather
+  than evaluation evidence. In both routes, the Go host advances the
+  authoritative game and the browser animates the completed trajectory without
+  receiving GPU access.
 
 ## Go as control plane, CUDA as numerical data plane
 
@@ -218,9 +221,9 @@ gradually and keep the Wordle problem visible throughout, rather than turning in
 
 ### Demo sequence
 
-1. Start with the browser: the checked-in capture shows validation word `ADEPT`
-   solved in three guesses while the page identifies hand-written CUDA via cgo,
-   the exported model, and the actual GPU.
+1. Start with the browser: type `ADEPT` into the free-text solution field. The
+   checked-in capture shows it solved in three guesses while the page identifies
+   hand-written CUDA via cgo, the exported model, and the actual GPU.
 2. Show the real Go wrapper: one cgo crossing, not a fake slide-only snippet.
 3. Show the real C ABI and CUDA launch, then explain grid, block, warp, thread,
    output-major weights, and the seven readable kernel names.

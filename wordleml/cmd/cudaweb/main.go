@@ -45,7 +45,7 @@ func run(args []string, stdout, stderr io.Writer) (runErr error) {
 	}
 	vocab, err := vocabulary.LoadWithoutFinalTest(config.dataDir)
 	if err != nil {
-		return fmt.Errorf("load validation-only vocabulary: %w", err)
+		return fmt.Errorf("load vocabulary without final-test split: %w", err)
 	}
 	hashes := vocab.Hashes()
 	backend, manifest, err := cudainfer.Load(config.modelDir, cudamodel.VocabularyHashes{

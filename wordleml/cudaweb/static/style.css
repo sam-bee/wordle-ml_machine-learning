@@ -24,7 +24,7 @@ body {
     #0d1110;
 }
 
-button, select { font: inherit; }
+button, input, select { font: inherit; }
 
 .page-shell {
   width: min(70rem, 100%);
@@ -117,12 +117,13 @@ label { display: block; margin-bottom: 0.45rem; color: var(--muted); font-size: 
 .model-field { flex: 2 1 18rem; }
 .solution-field { flex: 0 1 9rem; }
 
-select, button { min-height: 3rem; border: 1px solid #454b47; border-radius: 0.55rem; }
-select { width: 100%; padding: 0 0.85rem; background: #111512; color: #f4f5ef; font-weight: 750; letter-spacing: 0.08em; }
+input, select, button { min-height: 3rem; border: 1px solid #454b47; border-radius: 0.55rem; }
+input, select { width: 100%; padding: 0 0.85rem; background: #111512; color: #f4f5ef; font-weight: 750; letter-spacing: 0.08em; }
+input { text-transform: uppercase; }
 .model-field select { font-size: 0.82rem; letter-spacing: 0; }
 button { padding: 0 1.2rem; border-color: #6aaa64; background: #538d4e; color: white; cursor: pointer; font-weight: 800; }
 button:hover:not(:disabled) { background: #609b5b; }
-button:disabled, select:disabled { cursor: not-allowed; opacity: 0.52; }
+button:disabled, input:disabled, select:disabled { cursor: not-allowed; opacity: 0.52; }
 
 .message {
   margin-top: 1.5rem;

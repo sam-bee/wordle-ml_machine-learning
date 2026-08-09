@@ -23,7 +23,7 @@ type singletonService struct {
 
 func (service *singletonService) ModelIdentity() ModelIdentity { return service.identity }
 
-func (service *singletonService) ValidationSolutions() []string {
+func (service *singletonService) PlayableSolutions() []string {
 	return append([]string(nil), service.solutions...)
 }
 
