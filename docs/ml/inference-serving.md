@@ -1,11 +1,15 @@
-# Inference serving
+# Retained GoMLX inference serving
 
 The local visualiser can select the best checkpoint from any completed, passed
-run beneath `runs/`. The neural-network forward pass runs through GoMLX on the
-configured CUDA device; HTTP, input validation, state encoding, legal-action
-selection, and the authoritative Wordle engine remain in Go on the host. A
-game therefore makes up to six small GPU inference calls as its board state
-changes.
+run beneath `runs/`. The neural-network forward pass runs through GoMLX/XLA on
+the configured CUDA device; HTTP, input validation, state encoding,
+legal-action selection, and the authoritative Wordle engine remain in Go on
+the host. A game therefore makes up to six small GPU inference calls as its
+board state changes.
+
+This is the retained reference/fallback route, not the separate hand-written
+CUDA/cgo application. The latter is documented in
+[CUDA/cgo inference](cuda-cgo-inference.md).
 
 ## Runtime and API
 
@@ -60,3 +64,19 @@ Open <http://127.0.0.1:8082>. For an API-only process use `make inference`.
 The model picker re-scans `runs/`, so a newly completed compatible run appears
 without restarting the inference service. The final-test split remains sealed:
 only the fixed validation list is exposed or accepted.
+
+## Separate CUDA/cgo demonstration
+
+`make cuda-cgo-demo MODEL_DIR=<export-dir>` starts `cudaweb` at
+<http://127.0.0.1:8083>. Unlike this retained route, one Go process owns the
+browser UI, HTTP endpoints, Wordle engine, state encoding, Go-side
+availability mask, and a single locked cgo/CUDA worker. It accepts only the
+fixed validation solutions and exposes one immutable exported model; its
+`PUT /api/models` endpoint is idempotent for that model and rejects other
+IDs. No browser request is proxied to an inference process.
+
+`GET /healthz` and the model API identify `backend: "cuda-cgo"`, model
+format/run/checkpoint/update/training commit/weight hash/parameter count, and
+the selected GPU/runtime/driver details. The UI visibly identifies the
+hand-written CUDA/cgo backend, model, and device. The GoMLX visualiser remains
+useful for checkpoint selection and as an independent serving path.

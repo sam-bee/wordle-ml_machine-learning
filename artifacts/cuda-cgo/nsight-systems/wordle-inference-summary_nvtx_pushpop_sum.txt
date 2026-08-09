@@ -1,0 +1,9 @@
+
+ ** NVTX Push/Pop Range Summary (nvtx_pushpop_sum):
+
+ Time (%)  Total Time (ns)  Instances  Avg (ns)  Med (ns)  Min (ns)  Max (ns)  StdDev (ns)       Range
+ --------  ---------------  ---------  --------  --------  --------  --------  -----------  ----------------
+     50.5          3586579         41   87477.5   77380.0     62720    492340      65438.9  :wordle_infer
+     28.2          2000599         41   48795.1   38350.0     34060    445950      63701.3  :forward_pass
+     11.4           811850         41   19801.2   22850.0     12000     27300       5900.3  :copy_logits_d2h
+      9.9           702590         41   17136.3   17020.0     12950     30040       3654.2  :copy_inputs_h2d

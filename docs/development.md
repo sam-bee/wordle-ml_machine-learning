@@ -5,7 +5,7 @@ toolchains out of the host environment and gives demonstrations used in the talk
 
 ## Services
 
-The Compose project has four services:
+The Compose project has five services:
 
 - `wordleml` is the development image. It uses CUDA 13.1, Go 1.26.5, GoMLX 0.28.0, go-xla 0.3.0, and the CUDA 13 PJRT
   plugin. Source is bind-mounted at `/workspace` so container commands can edit and build it.
@@ -15,6 +15,9 @@ The Compose project has four services:
   build tests and compiles the Go server and its embedded HTML, CSS, and JavaScript into a small runtime image.
 - `tensorboard` runs TensorBoard from the official TensorFlow 2.20 image and reads self-contained run event directories
   below `runs/`. No GPU is passed to `web` or `tensorboard`.
+- `cudaweb` is a separate, GPU-enabled one-process demo on port 8083. It loads one validated exported FP32 model and
+  serves the browser and game API directly through the hand-written CUDA/cgo backend; it does not proxy to `inference`
+  and does not implement model hot swapping.
 
 `make monitoring` starts inference, web, and TensorBoard. Only web and TensorBoard bind host ports, both on loopback;
 the GPU API remains private to the Compose network.
@@ -42,6 +45,10 @@ The CUDA smoke program adds three further checks before running a tiny kernel:
 It is compiled with `-arch=sm_120`; no fallback architecture or PTX target is added. The GoMLX smoke program then runs
 a Euclidean-distance graph through `GOMLX_BACKEND=xla:cuda` and checks its result.
 
+The CUDA/cgo backend applies the same visible-device checks when its native
+model is created, and reports the approved device name, compute capability,
+CUDA runtime version, and driver version through its model metadata.
+
 ## Commands
 
 Run `make help` for the short list. The usual workflow is:
@@ -61,6 +68,49 @@ default is `proof-full-20260808`. Once `make monitoring` reports the inference
 service healthy, open <http://127.0.0.1:8082> and select a validation solution.
 See [inference serving](ml/inference-serving.md) for the REST contract and the
 host/device execution split.
+
+### CUDA/cgo direct inference
+
+The existing `inference` plus `web` services above are the retained GoMLX/XLA
+route. The CUDA/cgo route is a distinct one-process service: it loads one
+portable artifact, creates a locked CUDA worker, and serves its browser/API on
+<http://127.0.0.1:8083>. It is the only service that should be described as
+hand-written CUDA via cgo.
+
+The usual CUDA/cgo sequence is:
+
+```console
+make cuda-cgo-export RUN_ID=seed-replication-20260809-132505Z CHECKPOINT=best
+make cuda-cgo-build
+make cuda-cgo-test
+make cuda-cgo-verify MODEL_DIR=runs/seed-replication-20260809-132505Z/exports/cuda-f32-v1/best
+make cuda-cgo-bench MODEL_DIR=runs/seed-replication-20260809-132505Z/exports/cuda-f32-v1/best
+make cuda-cgo-demo MODEL_DIR=runs/seed-replication-20260809-132505Z/exports/cuda-f32-v1/best
+```
+
+`cuda-cgo-export` is the only step permitted to use GoMLX: it restores and
+exports the checkpoint. `cuda-cgo-build`, verifier, benchmark, and `cudaweb`
+use `CGO_ENABLED=1` and the `cuda_cgo` build tag; their runtime dependency
+graph must exclude GoMLX, PJRT, and XLA. The export command's default run is
+the selected seed-replication run recorded in the CUDA/cgo working notes. The
+artifact manifest, not the default, is the authoritative run/checkpoint/update
+identity.
+
+For reproducible profiler collections, run:
+
+```console
+make cuda-cgo-profile-systems MODEL_DIR=runs/seed-replication-20260809-132505Z/exports/cuda-f32-v1/best
+make cuda-cgo-profile-compute MODEL_DIR=runs/seed-replication-20260809-132505Z/exports/cuda-f32-v1/best
+```
+
+They write generated reports below `artifacts/cuda-cgo/`. The Systems target
+uses the locally installed host Nsight Systems 2025.6.3 directory through a
+read-only mount into the unprivileged container, leaving host software and
+driver settings unchanged. See
+[`artifacts/cuda-cgo/README.md`](../artifacts/cuda-cgo/README.md) for the
+mount/reproduction details and report interpretation. The full design,
+artifact layout, and measured verification gates are in
+[CUDA/cgo inference](ml/cuda-cgo-inference.md).
 
 `make tidy` and `make format` also execute the Go tools inside the development container. The generated files remain
 owned by the host UID and GID configured in `.env`.

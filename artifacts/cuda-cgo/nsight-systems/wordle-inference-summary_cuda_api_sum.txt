@@ -1,0 +1,18 @@
+
+ ** CUDA API Summary (cuda_api_sum):
+
+ Time (%)  Total Time (ns)  Num Calls  Avg (ns)  Med (ns)  Min (ns)  Max (ns)  StdDev (ns)               Name
+ --------  ---------------  ---------  --------  --------  --------  --------  -----------  ------------------------------
+     41.5          1678470        165   10172.5    5190.0      2710    320650      25151.8  cudaMemcpyAsync
+     36.6          1482789        287    5166.5    3570.0      2820    145050       8739.7  cudaLaunchKernel
+      5.4           217960          8   27245.0    3610.0      2160    123040      44918.8  cudaFree
+      4.5           181000          8   22625.0    4205.0      1970     85780      35083.6  cudaMalloc
+      4.3           174200          1  174200.0  174200.0    174200    174200          0.0  cuLibraryLoadData
+      3.6           144750          1  144750.0  144750.0    144750    144750          0.0  cudaStreamCreateWithFlags
+      2.4            98830         42    2353.1    1505.0      1200     35410       5230.1  cudaStreamSynchronize
+      1.1            44740        287     155.9     120.0        80       710         82.8  cuKernelGetName
+      0.3            13300          1   13300.0   13300.0     13300     13300          0.0  cudaStreamDestroy
+      0.1             3200          1    3200.0    3200.0      3200      3200          0.0  cuCtxSynchronize
+      0.1             2890          1    2890.0    2890.0      2890      2890          0.0  cuModuleGetLoadingMode
+      0.1             2470          1    2470.0    2470.0      2470      2470          0.0  cudaGetDeviceProperties_v12000
+      0.1             2230          7     318.6     270.0       190       580        128.6  cuLibraryGetKernel

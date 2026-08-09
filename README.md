@@ -2,7 +2,8 @@
 
 Wordle ML is a Go and CUDA project preparing a GoMLX policy to play Wordle. It contains the frozen imitation corpus,
 shared state encoder and batcher, fixed supervised-training proof stages, independently reloadable checkpoint
-evaluation, a reproducible development stack, GPU smoke test, TensorBoard, and a live checkpoint-backed web visualiser.
+evaluation, a reproducible development stack, GPU smoke test, TensorBoard, a retained GoMLX-backed web visualiser,
+and a separate hand-written CUDA/cgo inference demonstration.
 The proof workflow completed its first fixed validation proof; see the
 [initial training proof report](docs/ml/initial-training-proof-report.md).
 
@@ -37,8 +38,29 @@ The visualiser initially loads the best checkpoint from
 lists completed compatible runs beneath `runs/`; selecting one restores and
 warms that run's best checkpoint on the CUDA device before inference continues.
 The interface also offers the fixed validation solutions and animates a
-complete game returned by the internal CUDA inference API. The browser and web
-container never receive direct GPU access.
+complete game returned by the internal **GoMLX/XLA** inference API. The browser
+and web container never receive direct GPU access.
+
+## CUDA/cgo direct demo
+
+The retained visualiser at port 8082 is deliberately not the hand-written CUDA
+path. The separate CUDA/cgo demo exports one selected completed checkpoint into
+a versioned, hash-checked FP32 artifact, then starts one Go process on port
+8083. That process serves the same style of browser UI and calls CUDA through
+cgo directly—there is no HTTP proxy to a second inference service. It keeps
+Wordle rules, state encoding, legality filtering, and tie-breaking in Go; CUDA
+returns raw logits only.
+
+```console
+make cuda-cgo-export RUN_ID=seed-replication-20260809-132505Z CHECKPOINT=best
+make cuda-cgo-demo MODEL_DIR=runs/seed-replication-20260809-132505Z/exports/cuda-f32-v1/best
+```
+
+Open <http://127.0.0.1:8083> after the demo service is healthy. See
+[`docs/ml/cuda-cgo-inference.md`](docs/ml/cuda-cgo-inference.md) for the
+artifact contract, verification, profiling, and command sequence. The existing
+GoMLX training and port-8082 serving path remain available as the reference and
+fallback route.
 
 Proof runs write scalar and histogram events under `runs/<run-id>/events`, which TensorBoard discovers beneath
 `runs/`. See

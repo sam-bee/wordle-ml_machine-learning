@@ -1,8 +1,11 @@
 # Model-facing Wordle state
 
-The shared `wordleml/modelstate` package is the sole host-side encoder for both training records and future live play.
-It accepts a 289-byte, LSB-first bitset over the canonical solution IDs plus a turn from zero through five. It rejects
-empty sets and non-zero padding bits, then produces the four values consumed by `policy.Model.Forward`:
+The shared `wordleml/modelstate` package is the sole host-side encoder for
+training records, retained GoMLX serving, and the CUDA/cgo demo. It accepts a
+289-byte, LSB-first bitset over the canonical solution IDs plus a turn from
+zero through five. It rejects empty sets and non-zero padding bits, then
+produces the four values consumed by `policy.Model.Forward` and the
+hand-written CUDA forward pass:
 
 - FP32 `CandidateMask[2309]`;
 - FP32 `CandidateStats[209]`;
@@ -37,3 +40,6 @@ lead to a different policy early or late in the six-guess game.
 `remainingActionMask` is indexed by the 4,739-word action vocabulary. An entry is one only when that action word is among
 the remaining candidate solutions. It does not describe legality: the model adds `beta * remainingActionMask` to its
 ordinary action logits, so words used as information-gathering probes keep their base logits and remain selectable.
+Go retains a separate available-action mask for history-based repeat
+suppression and deterministic legal selection after either inference backend
+returns raw logits.

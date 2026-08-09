@@ -22,8 +22,9 @@ gradually and keep the Wordle problem visible throughout, rather than turning in
   Laptop GPU name) and rejects every other visible card, including an RTX 3060.
 - Use the small CUDA smoke kernel to make `sm_120`, compute capability 12.0, host/device memory, and kernel launch syntax
   concrete before introducing model code.
-- Follow it with the GoMLX Euclidean-distance graph to introduce symbolic graphs, XLA compilation, and the CUDA backend
-  before introducing the full Wordle policy graph.
+- Follow it with the GoMLX Euclidean-distance graph to introduce symbolic graphs, XLA compilation, and the reference
+  CUDA backend before introducing the full Wordle policy graph. Make clear that the later hand-written CUDA/cgo demo is
+  a separate inference route, not a claim that GoMLX has disappeared.
 - Use the small standard-library TensorBoard writer as a reassuring Go detail:
   it writes ordinary scalar and histogram event files, not a new monitoring
   system. Actual learning claims still require a completed, passing proof run.
@@ -123,17 +124,117 @@ gradually and keep the Wordle problem visible throughout, rather than turning in
   is a useful lesson: a small validation metric improvement did not improve
   this gameplay success rate. Keep the claim validation-only and the final
   test sealed.
-- For the live demo, use the web application's run picker to contrast the
-  retained proof and production best checkpoints. Changing the selection
-  restores and warms that checkpoint on CUDA before it becomes active; the
-  original model remains available if loading fails. Then select a validation
-  solution. The Go server proxies same-origin requests to the internal
-  inference service; the Go host advances the authoritative game and encodes
-  each state, while up to six policy forward passes execute through GoMLX on
-  CUDA. The browser animates the returned trajectory without receiving GPU
-  access.
+- Keep the existing port-8082 GoMLX visualiser as a useful contrast: its run
+  picker selects compatible checkpoints and the browser proxies to an internal
+  GoMLX/XLA service. The direct port-8083 CUDA/cgo demo deliberately differs:
+  it serves one exported checkpoint from one Go process, has no HTTP inference
+  proxy and no CUDA hot swap, and visibly names the `cuda-cgo` backend and GPU.
+  In either demo, select only an advertised validation solution; the Go host
+  advances the authoritative game and the browser animates the completed
+  trajectory without receiving GPU access.
+
+## Go as control plane, CUDA as numerical data plane
+
+### Ownership and legality
+
+- Say “control plane” in the ordinary engineering sense, not as ML jargon:
+  Go owns the web application, model artifact validation, vocabulary hashes,
+  Wordle feedback/rules, shared board-state encoding, and complete-game
+  orchestration.
+- CUDA receives four numeric tensors and returns 4,739 raw FP32 logits. It is
+  deliberately not told which actions Go has suppressed because they were
+  guessed already; it has no Wordle rule implementation and no CUDA-side
+  argmax.
+- Revisit the two masks. `remainingActionMask` is a learned candidate bonus
+  input; it is not a hard-mode or legal-action mask. Go applies the separate
+  availability mask afterwards, suppresses repeated guesses, and retains the
+  existing lower-action-ID tie behavior.
+
+### The cgo boundary
+
+- Show the plain C ABI around CUDA C++: an opaque C-owned model handle is
+  created once, accepts four fixed input arrays, and returns one logit array.
+  It is deliberately small enough to fit on a slide.
+- One complete forward pass crosses cgo once. Calling from Go once per layer
+  would hide the actual boundary behind plumbing and make every layer a
+  host/device coordination point.
+- There is no callback from C to Go and C never retains a Go pointer. The Go
+  wrapper uses `runtime.KeepAlive`; the native call is synchronous from Go’s
+  perspective and returns only after the logits copy and stream synchronization.
+- A dedicated goroutine calls `runtime.LockOSThread`, creates the handle,
+  serializes inference, and destroys it on that same OS thread. This gives the
+  CUDA context a simple owner and makes a `wordle-gpu` lane recognizable in
+  Nsight Systems.
+
+### Threads, warps, blocks, and grids
+
+- Use the actual output-layer launch: **4,739 blocks**, **128 threads per
+  block**, **4 warps per block**, and **one block computes one possible-word
+  logit**.
+- That is 606,592 logical threads in the launch, not 606,592 CPU-like threads
+  simultaneously resident on the GPU. Hardware schedules blocks onto SMs in
+  waves; occupancy, registers, and available resources affect how many are
+  active at once.
+- In each dense block, every thread accumulates a strided part of one dot
+  product in a register. Warp shuffles reduce those partials; four warp
+  leaders use a tiny shared-memory reduction before one thread writes the
+  output. This connects a familiar Go loop to the GPU mapping without turning
+  the talk into a general CUDA course.
+
+### Memory
+
+- Draw the actual data path: Go slices in host memory; three input copies to
+  device global memory; one persistent global-memory weight allocation; device
+  buffers for hidden state, residual scratch, beta, and output; then one logits
+  copy back to host memory.
+- Weights and persistent buffers allocate at model creation, not within each
+  inference. Global-memory reads may use caches. Per-thread partial sums live
+  in registers; the four warp subtotals use shared memory.
+- Be precise that shared memory belongs to one block, not the whole GPU. Local
+  memory is what spills from registers to device memory; do not describe it as
+  fast local CPU stack storage. Use the Nsight Compute report to establish any
+  actual register/shared/local values.
+
+### Profiling
+
+- Nsight Systems is the wide-angle timeline: host thread, NVTX inference range,
+  HtoD copies, seven named kernels, DtoH copy, and synchronization.
+- Nsight Compute is the microscope for one kernel, here
+  `policy_logits_with_bonus`: launch configuration, occupancy, memory workload,
+  register/shared use, and source correlation.
+- The collected Systems report now shows `wordle-gpu`, its NVTX range, all
+  three input copies, all seven kernels, the output copy, and final
+  synchronization. Explain that a checked CUDA-device reset at teardown gives
+  CUPTI a finalization point; it is not work performed during inference.
+- The collected Compute report is a concrete but narrow observation: the
+  4,739 × 128 policy launch took 11.36 µs, used 40 registers/thread, had 16 B
+  static plus 1.02 KB driver shared memory per block, no local/shared spills,
+  and achieved 69.89% occupancy against 100% theoretical. Use those values to
+  explain a report, not to claim a universal optimum or speedup.
+- Batch-one inference is intentionally a useful teaching case because cgo
+  crossing, kernel launches, and transfers can matter. CUDA is not faster just
+  because a GPU was used; use the benchmark and profiler reports before making
+  a performance claim.
+
+### Demo sequence
+
+1. Start with the browser: the checked-in capture shows validation word `ADEPT`
+   solved in three guesses while the page identifies hand-written CUDA via cgo,
+   the exported model, and the actual GPU.
+2. Show the real Go wrapper: one cgo crossing, not a fake slide-only snippet.
+3. Show the real C ABI and CUDA launch, then explain grid, block, warp, thread,
+   output-major weights, and the seven readable kernel names.
+4. Open Nsight Systems and zoom into one `wordle_infer` range on `wordle-gpu`.
+5. Open Nsight Compute at `policy_logits_with_bonus` and show launch,
+   occupancy, memory, and source views.
+6. Conclude with the measured parity and benchmark evidence, not a presumed
+   speedup: 32/32 golden top-1/top-5/selected actions and 100/100 validation
+   trajectories match; the 200-call warm benchmark mean was 94,945 ns. Nsight
+   GUI screenshots remain a manual capture step even though report artifacts
+   exist.
 
 ## Later structure
 
-[To be expanded after the first experiment: baseline, learning curves, Go/CUDA boundary, failures and lessons, and
-conclusion.]
+[Develop this into slides around the browser result, model diagram, Go/CUDA
+boundary, verification evidence, profiler evidence, failures and lessons, and
+conclusion. Keep the Wordle game visible at each transition.]

@@ -2,7 +2,9 @@
 
 The GoMLX model in [`wordleml/policy`](../../wordleml/policy/) assigns one raw logit to every word in the fixed action
 vocabulary. It contains the policy architecture only: state generation, training, loss calculation, action selection,
-gameplay, and the eventual hand-written CUDA implementation are separate work.
+and gameplay are separate work. The hand-written CUDA/cgo backend implements
+this exact fixed FP32 graph from an exported artifact; see
+[CUDA/cgo inference](cuda-cgo-inference.md).
 
 The current data contains 2,309 possible solutions (`S`) and 4,739 actions (`A`). These values are passed in through
 `policy.Config`; the model does not hard-code either vocabulary size. Wordle's fixed five-letter words, six turns, and

@@ -1,0 +1,12 @@
+
+ ** CUDA GPU Kernel/Grid/Block Summary (cuda_gpu_kern_gb_sum):
+
+ Time (%)  Total Time (ns)  Instances  Avg (ns)  Med (ns)  Min (ns)  Max (ns)  StdDev (ns)     GridXYZ         BlockXYZ               Name
+ --------  ---------------  ---------  --------  --------  --------  --------  -----------  --------------  --------------  -------------------------
+     43.2           238052         41    5806.1    5760.0      5664      6464        145.4  4739    1    1   128    1    1  policy_logits_with_bonus
+     17.8            98080         41    2392.2    2400.0      2304      2560         40.3    96    1    1   128    1    1  candidate_projection_relu
+      9.9            54528         41    1330.0    1344.0      1248      1440         37.9   160    1    1   128    1    1  residual_out_skip_relu
+      9.1            50304         41    1226.9    1216.0      1152      1312         49.9   160    1    1   128    1    1  residual_in_relu
+      9.1            50016         41    1219.9    1216.0      1152      1312         44.2    48    1    1   128    1    1  stats_projection_relu
+      6.9            38112         41     929.6     928.0       896      1152         47.4     1    1    1   128    1    1  candidate_bonus
+      4.0            22112         41     539.3     544.0       480       608         29.1     1    1    1    32    1    1  load_turn_embedding

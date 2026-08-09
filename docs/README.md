@@ -8,7 +8,10 @@ Current project documentation:
 - [`data/overview-of-wordlists.md`](data/overview-of-wordlists.md) documents the model vocabularies and their provenance.
 - [`ml/model-structure.md`](ml/model-structure.md) describes the GoMLX policy architecture and parameter count.
 - [`ml/board-state-encoding.md`](ml/board-state-encoding.md) describes the four precomputed tensors consumed by the model.
-- [`ml/inference-serving.md`](ml/inference-serving.md) describes the warm CUDA inference API and browser gameplay flow.
+- [`ml/inference-serving.md`](ml/inference-serving.md) describes the retained warm GoMLX/XLA inference API and browser
+  gameplay flow.
+- [`ml/cuda-cgo-inference.md`](ml/cuda-cgo-inference.md) describes the offline GoMLX exporter, the GoMLX-free
+  hand-written CUDA/cgo runtime, its artifact contract, verification, profiling, and direct browser demo.
 - [`ml/supervised-training.md`](ml/supervised-training.md) describes the frozen teacher corpus, loss, metrics, and
   completed initial supervised-training proof, with a link to its report.
 - [`ml/initial-training-proof-report.md`](ml/initial-training-proof-report.md) is the generated evidence from the
@@ -19,3 +22,5 @@ Current project documentation:
   subsequent review boundary;
   [`project-plan/codex-initial-training-proof-plan.md`](project-plan/codex-initial-training-proof-plan.md) records
   the implementation requirements and proof gates used for that run.
+- [`project-plan/cuda-cgo-inference-working-notes.md`](project-plan/cuda-cgo-inference-working-notes.md) records the
+  pre-implementation package map and selected checkpoint provenance for the CUDA/cgo work.
