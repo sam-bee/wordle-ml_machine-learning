@@ -2,7 +2,7 @@
 
 .PHONY: help configure docker-build build report test tidy format gpu-check smoke shell \
 	monitoring inference inference-logs web web-logs tensorboard tensorboard-logs logs down \
-	cuda-cgo-export cuda-cgo-native cuda-cgo-build cuda-cgo-test cuda-cgo-verify \
+	cuda-cgo-export cuda-cgo-native cuda-cgo-build cuda-cgo-test cuda-cgo-verify cuda-cgo-final-test cuda-cgo-final-test-preflight \
 	cuda-cgo-dependency-audit cuda-cgo-bench cuda-cgo-demo cuda-cgo-demo-logs cuda-cgo-profile-systems \
 	cuda-cgo-profile-compute
 
@@ -70,6 +70,8 @@ help:
 	@echo "                       Prove runtime binaries contain no GoMLX/PJRT/XLA"
 	@echo "  make cuda-cgo-verify MODEL_DIR=<path>"
 	@echo "                       Verify golden vectors and validation games"
+	@echo "  make cuda-cgo-final-test MODEL_DIR=<path>"
+	@echo "                       One-time, confirmation-gated final-test gameplay evaluation"
 	@echo "  make cuda-cgo-bench MODEL_DIR=<path>"
 	@echo "                       Run the deterministic CUDA benchmark"
 	@echo "  make cuda-cgo-demo MODEL_DIR=<path>"
@@ -160,6 +162,7 @@ cuda-cgo-build: cuda-cgo-native
 		'mkdir -p /workspace/$(CUDA_BIN_DIR) && \
 		CGO_ENABLED=1 go build -tags $(CUDA_CGO_TAG) -o /workspace/$(CUDA_BIN_DIR)/cudaverify ./cmd/cudaverify && \
 		CGO_ENABLED=1 go build -tags $(CUDA_CGO_TAG) -o /workspace/$(CUDA_BIN_DIR)/cudabench ./cmd/cudabench && \
+		CGO_ENABLED=1 go build -tags $(CUDA_CGO_TAG) -ldflags "-X main.evaluatorCommit=$$(git -C /workspace rev-parse HEAD)" -o /workspace/$(CUDA_BIN_DIR)/cudafinal ./cmd/cudafinal && \
 		CGO_ENABLED=1 go build -tags $(CUDA_CGO_TAG) -o /workspace/$(CUDA_BIN_DIR)/cudaweb ./cmd/cudaweb'
 
 cuda-cgo-test: cuda-cgo-native
@@ -167,18 +170,45 @@ cuda-cgo-test: cuda-cgo-native
 
 cuda-cgo-dependency-audit: cuda-cgo-build
 	$(CUDA_RUN) bash -lc \
-		'dependencies="$$(go list -deps -tags $(CUDA_CGO_TAG) ./cmd/cudaweb ./cmd/cudaverify ./cmd/cudabench)"; \
+		'dependencies="$$(go list -deps -tags $(CUDA_CGO_TAG) ./cmd/cudaweb ./cmd/cudaverify ./cmd/cudabench ./cmd/cudafinal)"; \
 		if printf "%s\n" "$$dependencies" | grep -Eiq "gomlx|go-xla|pjrt|(^|/)xla($$|/)|github.com/sam-bee/wordle-ml_machine-learning/(proofgames|serving|proofrun|supervised)($$|/)"; then \
 			printf "%s\n" "$$dependencies" | grep -Ei "gomlx|go-xla|pjrt|(^|/)xla($$|/)|github.com/sam-bee/wordle-ml_machine-learning/(proofgames|serving|proofrun|supervised)($$|/)"; \
 			echo "forbidden CUDA runtime dependency found" >&2; \
 			exit 1; \
 		fi; \
-		go version -m /workspace/$(CUDA_BIN_DIR)/cudaweb; \
-		ldd /workspace/$(CUDA_BIN_DIR)/cudaweb; \
-		echo "dependency audit passed: cudaweb, cudaverify, and cudabench have no forbidden runtime package dependency"'
+		for binary in cudaweb cudaverify cudabench cudafinal; do \
+			go version -m /workspace/$(CUDA_BIN_DIR)/$$binary; \
+			ldd /workspace/$(CUDA_BIN_DIR)/$$binary; \
+		done; \
+		echo "dependency audit passed: cudaweb, cudaverify, cudabench, and cudafinal have no forbidden runtime package dependency"'
 
 cuda-cgo-verify: cuda-cgo-dependency-audit
 	$(CUDA_RUN) /workspace/$(CUDA_BIN_DIR)/cudaverify -model-dir=$(CUDA_MODEL_DIR)
+
+# This check is intentionally separate and runs before the recursive build
+# below. Every tracked runtime input must match HEAD before a binary can be
+# built for the only final-test read. AGENTS.md is the sole exception because
+# it is an operator instruction file, not compiled input, and currently has a
+# preserved user edit.
+cuda-cgo-final-test-preflight:
+	@git diff --quiet HEAD -- . ':(exclude)AGENTS.md' && \
+		test -z "$$(git ls-files --others --exclude-standard)" || \
+		{ echo "commit every runtime source change before final-test evaluation" >&2; exit 1; }
+
+# This is intentionally not a prerequisite of any other target. Its command
+# must be invoked explicitly; cudafinal claims one fixed report path before
+# opening the final-test word list, so a later invocation cannot retry it.
+cuda-cgo-final-test: cuda-cgo-final-test-preflight
+	$(MAKE) cuda-cgo-dependency-audit
+	$(CUDA_RUN) bash -lc \
+		'git diff --quiet HEAD -- . ":(exclude)AGENTS.md" && \
+		test -z "$$(git ls-files --others --exclude-standard)" || \
+			{ echo "runtime sources changed after final-test preflight" >&2; exit 1; }; \
+		CGO_ENABLED=1 go build -tags $(CUDA_CGO_TAG) \
+			-ldflags "-X main.evaluatorCommit=$$(git -C /workspace rev-parse HEAD)" \
+			-o /workspace/$(CUDA_BIN_DIR)/cudafinal ./cmd/cudafinal && \
+		/workspace/$(CUDA_BIN_DIR)/cudafinal -confirm-final-test \
+			-model-dir=$(CUDA_MODEL_DIR)'
 
 cuda-cgo-bench: cuda-cgo-dependency-audit
 	$(CUDA_RUN) /workspace/$(CUDA_BIN_DIR)/cudabench -model-dir=$(CUDA_MODEL_DIR) \
