@@ -26,7 +26,7 @@ docker-build: .env
 
 build: docker-build
 	docker compose run --rm --no-deps wordleml bash -lc \
-		'go build -o /tmp/wordleml-smoke ./cmd/smoke && go build -o /tmp/wordleml-inspect ./cmd/inspect && go build -o /tmp/wordleml-train ./cmd/train && go build -o /tmp/wordleml-production ./cmd/production && go build -o /tmp/wordleml-evaluate ./cmd/evaluate && go build -o /tmp/wordleml-report ./cmd/report && go build -o /tmp/wordleml-serve ./cmd/serve && cd /workspace/web && go build -o /tmp/wordleml-web ./cmd/server'
+		'go build -o /tmp/wordleml-smoke ./cmd/smoke && go build -o /tmp/wordleml-inspect ./cmd/inspect && go build -o /tmp/wordleml-train ./cmd/train && go build -o /tmp/wordleml-rl-train ./cmd/rl-train && go build -o /tmp/wordleml-production ./cmd/production && go build -o /tmp/wordleml-evaluate ./cmd/evaluate && go build -o /tmp/wordleml-report ./cmd/report && go build -o /tmp/wordleml-serve ./cmd/serve && cd /workspace/web && go build -o /tmp/wordleml-web ./cmd/server'
 
 report: docker-build
 	@echo "Use: docker compose run --rm --no-deps wordleml go run ./cmd/report -overfit-run-id=<id> -mini-run-id=<id> -full-run-id=<id> -output=../docs/ml/initial-training-proof-report.md"

@@ -150,6 +150,44 @@ gradually and keep the Wordle problem visible throughout, rather than turning in
   CUDA. The browser animates the returned trajectory without receiving GPU
   access.
 
+## Optional bounded PPO route
+
+- Present reinforcement learning as an auditable ablation after, not instead
+  of, the successful supervised baseline. The known-good actor is copied
+  read-only; a separate, small scalar critic avoids changing its checkpoint
+  structure or deployment logits. Actor-only export still serves without the
+  critic.
+- Make the environment boundary visible: Go's existing Wordle engine owns the
+  hidden answer, feedback, legal transitions, and six-turn ending. The model
+  receives only the existing encoded board state. It never receives the answer.
+- Contrast the learned candidate bonus with the hard sampling mask. PPO masks
+  only already accepted guesses, so repeats cannot be sampled while a
+  non-candidate probe word remains available. Every sampled transition stores
+  that exact mask and the old log-probability; otherwise a PPO probability
+  ratio would be meaningless.
+- Use the simple completed-game reward in the slide: -0.05 for a continuing
+  guess, +1 for solving, -1 for failing after six. State explicitly that the
+  first experiment has no teacher or candidate-count shaping.
+- Explain PPO in one line: compare the new selected-action probability with
+  the frozen rollout actor, clip the ratio, and use a value estimate to reduce
+  variance. Then point out why clipping alone is insufficient: a permanent KL
+  constraint holds the experiment near the successful supervised actor.
+- Preserve the experimental hygiene story. Hash-split 2,109 supervised
+  training answers into 1,909 rollout and 200 PPO-development answers; leave
+  the existing validation 100 and sealed final-test 100 untouched. Rollouts
+  are fresh and on-policy for every iteration, then discarded.
+- Make acceptance a deployment question: compare deterministic greedy games on
+  all 200 PPO-development answers, require no reduced solve count, better
+  failure-counted guesses, no illegal/repeated guesses, stable numerics,
+  controlled KL, and non-collapsed entropy. Use paired bootstrap intervals to
+  call a result rejected, inconclusive, promising, or convincingly improved.
+- Checkpoints and TensorBoard make failure safe and inspectable: each candidate
+  lives in a separate PPO directory with actor/critic and actor-only exports;
+  only a passed candidate becomes accepted. If the initial seed looks
+  successful, repeat the bounded pilot from the original actor with a second
+  seed before making that claim. Do not state a PPO outcome in the talk until
+  the separate experiment report exists.
+
 ## Later structure
 
 [To be expanded after the first experiment: baseline, learning curves, Go/CUDA boundary, failures and lessons, and

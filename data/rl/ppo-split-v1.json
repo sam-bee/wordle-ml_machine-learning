@@ -1,0 +1,19 @@
+{
+  "version": "ppo-split-v1",
+  "ranking": "ascending SHA-256 bytes of hash_domain followed by uppercase training word; word lexical order breaks an impossible digest tie",
+  "hash_domain": "wordleml-ppo-rl-split-v1\n",
+  "source_training": {
+    "count": 2109,
+    "sha256": "70184dfa5c291a73c8576f8ea6bbe041482890b63b68e965e9c94069577f7b78"
+  },
+  "development": {
+    "count": 200,
+    "sha256": "0a8b325b5599d33a42f9badf95f4a2a02251ac6ec9a9d008feb24675faef59d8"
+  },
+  "rollout": {
+    "count": 1909,
+    "sha256": "b715f1342ce0525b6a80ed014b7d8cd4b170cc4abe642d6f90d30507199cde76"
+  },
+  "validation": "untouched: existing 100-solution validation population is excluded from PPO generation, rollouts, updates, and development evaluation",
+  "final_test": "sealed and untouched: excluded from PPO generation, rollouts, updates, and development evaluation"
+}
