@@ -303,13 +303,15 @@ func parseSummaryValue(t *testing.T, data []byte) (*parsedScalar, *parsedHistogr
 				t.Fatalf("scalar simple_value has wire type %d and length %d", wireType, len(value))
 			}
 			scalar = &parsedScalar{tag: tag, value: math.Float32frombits(binary.LittleEndian.Uint32(value))}
-		case 6:
+		case 5: // Summary.Value.histo in TensorFlow's summary.proto.
 			if wireType != 2 {
 				t.Fatalf("histogram has wire type %d", wireType)
 			}
 			parsed := parseHistogram(t, value)
 			parsed.tag = tag
 			histogram = &parsed
+		case 6:
+			t.Fatal("histogram used Summary.Value field 6 (audio), want field 5 (histo)")
 		}
 		data = rest
 	}

@@ -33,6 +33,11 @@ type Histogram struct {
 
 const maxHistogramBuckets = 30
 
+// Summary.Value.histo is field 5 in TensorFlow's summary.proto. Field 6 is
+// audio, whose first field has a different wire type; using it makes
+// TensorBoard stop loading the event file at the first histogram.
+const summaryValueHistogramField = 5
+
 // Writer appends summaries to one TensorBoard event file.
 type Writer struct {
 	mu     sync.Mutex
@@ -136,7 +141,7 @@ func histogramEvent(step int64, histograms []Histogram) []byte {
 	for _, histogram := range histograms {
 		value := make([]byte, 0, len(histogram.Tag)+64)
 		value = appendString(value, 1, histogram.Tag)
-		value = appendBytes(value, 6, histogramProto(histogram.Values))
+		value = appendBytes(value, summaryValueHistogramField, histogramProto(histogram.Values))
 		summary = appendBytes(summary, 1, value)
 	}
 

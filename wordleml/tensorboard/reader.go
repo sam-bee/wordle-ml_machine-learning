@@ -242,7 +242,7 @@ func decodeSummaryValue(data []byte, step int64, sourceFile string) (*ScalarReco
 				return nil, nil, fmt.Errorf("%w: Summary.Value has multiple supported value kinds", ErrMalformedEvent)
 			}
 			scalar = &ScalarRecord{Step: step, Value: math.Float32frombits(binary.LittleEndian.Uint32(value.bytes)), SourceFile: sourceFile}
-		case 6: // Summary.Value.histo
+		case 5: // Summary.Value.histo
 			if wireType != 2 {
 				return nil, nil, malformedField("Summary.Value.histo", wireType, 2)
 			}

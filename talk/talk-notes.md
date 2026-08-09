@@ -27,6 +27,10 @@ gradually and keep the Wordle problem visible throughout, rather than turning in
 - Use the small standard-library TensorBoard writer as a reassuring Go detail:
   it writes ordinary scalar and histogram event files, not a new monitoring
   system. Actual learning claims still require a completed, passing proof run.
+- Include its protobuf compatibility bug as an engineering lesson: the writer
+  and its hand-written reader initially agreed on the wrong histogram field,
+  while the real TensorBoard consumer did not. The fix pins the canonical
+  field in a regression and checks output with TensorBoard itself.
 
 ## Wordle as a model problem
 
