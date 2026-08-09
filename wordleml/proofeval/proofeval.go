@@ -227,10 +227,10 @@ func Run(ctx context.Context, options Options) (Result, error) {
 }
 
 // validateEvaluationTrainingComplete is intentionally the first evaluation
-// preflight after config parsing: a failed mini/full gate must not load data,
-// create a CUDA backend, or publish any evaluation artifact.
+// preflight after config parsing: a failed mini, full, or production gate must
+// not load data, create a CUDA backend, or publish any evaluation artifact.
 func validateEvaluationTrainingComplete(layout runstate.Layout, stage proofrun.Stage) error {
-	if stage != proofrun.Mini && stage != proofrun.Full {
+	if stage != proofrun.Mini && stage != proofrun.Full && stage != proofrun.Production {
 		return nil
 	}
 	contents, err := os.ReadFile(layout.FinalMetricsPath)
@@ -252,7 +252,7 @@ func validateEvaluationTrainingComplete(layout runstate.Layout, stage proofrun.S
 
 func isCanonicalReportTrajectory(stage proofrun.Stage, checkpoint Checkpoint, mode Mode) bool {
 	return (stage == proofrun.Mini && checkpoint == Latest && mode == Games10) ||
-		(stage == proofrun.Full && checkpoint == Best && mode == Games100)
+		((stage == proofrun.Full || stage == proofrun.Production) && checkpoint == Best && mode == Games100)
 }
 
 // verifyEvaluationMetadata runs before vocabulary.Load or imitationdata.Load,
@@ -295,7 +295,7 @@ func persistEvaluation(layout runstate.Layout, result Result) error {
 	if training.Stage != result.Stage {
 		return fmt.Errorf("final metrics stage %q differs from evaluation stage %q", training.Stage, result.Stage)
 	}
-	if (training.Stage == proofrun.Mini || training.Stage == proofrun.Full) && !training.Passed {
+	if (training.Stage == proofrun.Mini || training.Stage == proofrun.Full || training.Stage == proofrun.Production) && !training.Passed {
 		return fmt.Errorf("refusing to persist %s evaluation before %s training has passed", result.Mode, training.Stage)
 	}
 	var document map[string]json.RawMessage
@@ -376,11 +376,15 @@ func validateCombination(stage proofrun.Stage, checkpoint Checkpoint, mode Mode)
 		if stage == proofrun.Mini && checkpoint == Latest {
 			return nil
 		}
-	case Games100, Ablations:
-		if stage == proofrun.Full && checkpoint == Best {
+	case Games100:
+		if (stage == proofrun.Full || stage == proofrun.Production) && checkpoint == Best {
 			return nil
 		}
-		if mode == Games100 && stage == proofrun.Full && checkpoint == Initial {
+		if stage == proofrun.Full && checkpoint == Initial {
+			return nil
+		}
+	case Ablations:
+		if stage == proofrun.Full && checkpoint == Best {
 			return nil
 		}
 	}
@@ -792,69 +796,80 @@ func EvaluateGames(ctx context.Context, session *supervised.Session, vocab *voca
 
 func writeGameScalars(eventsDir string, step int64, evaluation proofgames.Evaluation) error {
 	expected := proofgames.TensorBoardScalars(evaluation)
-	present, err := matchingGameScalarsExist(eventsDir, step, expected)
+	missing, err := missingGameScalars(eventsDir, step, expected)
 	if err != nil {
 		return err
 	}
-	if present {
+	if len(missing) == 0 {
 		return nil
 	}
 	writer, err := tensorboard.New(eventsDir)
 	if err != nil {
 		return fmt.Errorf("open game TensorBoard events: %w", err)
 	}
-	if err := writer.WriteScalars(step, expected...); err != nil {
+	if err := writer.WriteScalars(step, missing...); err != nil {
 		_ = writer.Close()
 		return fmt.Errorf("write game TensorBoard scalars: %w", err)
 	}
 	if err := writer.Close(); err != nil {
 		return fmt.Errorf("close game TensorBoard events: %w", err)
 	}
-	present, err = matchingGameScalarsExist(eventsDir, step, expected)
+	missing, err = missingGameScalars(eventsDir, step, expected)
 	if err != nil {
 		return err
 	}
-	if !present {
+	if len(missing) != 0 {
 		return errors.New("game TensorBoard scalar verification failed after write")
 	}
 	return nil
 }
 
-// matchingGameScalarsExist returns true only when every expected game tag is
-// present exactly once at step with its exact FP32 value. Other runner-owned
-// tags at the same step are intentionally ignored.
-func matchingGameScalarsExist(eventsDir string, step int64, expected []tensorboard.Scalar) (bool, error) {
-	inspection, err := tensorboard.InspectDir(eventsDir)
-	if errors.Is(err, tensorboard.ErrNoEventFiles) {
-		return false, nil
-	}
-	if err != nil {
-		return false, fmt.Errorf("inspect TensorBoard events before game telemetry: %w", err)
-	}
+// missingGameScalars validates every existing expected game scalar at step and
+// returns only the values not yet present. Existing values must be finite,
+// unique, and bit-for-bit identical. Other runner-owned tags are ignored.
+func missingGameScalars(eventsDir string, step int64, expected []tensorboard.Scalar) ([]tensorboard.Scalar, error) {
 	want := make(map[string]float32, len(expected))
 	for _, scalar := range expected {
+		if scalar.Tag == "" || !finite(scalar.Value) {
+			return nil, fmt.Errorf("expected game TensorBoard scalar %q is not finite", scalar.Tag)
+		}
+		if _, alreadyExpected := want[scalar.Tag]; alreadyExpected {
+			return nil, fmt.Errorf("expected game TensorBoard tag %q appears more than once", scalar.Tag)
+		}
 		want[scalar.Tag] = scalar.Value
 	}
-	found := make(map[string][]float32, len(expected))
+	inspection, err := tensorboard.InspectDir(eventsDir)
+	if errors.Is(err, tensorboard.ErrNoEventFiles) {
+		return expected, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("inspect TensorBoard events before game telemetry: %w", err)
+	}
+	found := make(map[string]float32, len(expected))
 	for _, scalar := range inspection.Scalars {
 		if scalar.Step != step {
 			continue
 		}
-		if _, required := want[scalar.Tag]; required {
-			found[scalar.Tag] = append(found[scalar.Tag], scalar.Value)
+		expectedValue, required := want[scalar.Tag]
+		if !required {
+			continue
+		}
+		if !finite(scalar.Value) {
+			return nil, fmt.Errorf("game TensorBoard tag %q at step %d is non-finite", scalar.Tag, step)
+		}
+		if _, duplicate := found[scalar.Tag]; duplicate {
+			return nil, fmt.Errorf("game TensorBoard tag %q at step %d has more than one record", scalar.Tag, step)
+		}
+		if math.Float32bits(scalar.Value) != math.Float32bits(expectedValue) {
+			return nil, fmt.Errorf("game TensorBoard tag %q at step %d has value %g, want %g", scalar.Tag, step, scalar.Value, expectedValue)
+		}
+		found[scalar.Tag] = scalar.Value
+	}
+	missing := make([]tensorboard.Scalar, 0, len(expected)-len(found))
+	for _, scalar := range expected {
+		if _, present := found[scalar.Tag]; !present {
+			missing = append(missing, scalar)
 		}
 	}
-	if len(found) == 0 {
-		return false, nil
-	}
-	for tag, expectedValue := range want {
-		values := found[tag]
-		if len(values) != 1 {
-			return false, fmt.Errorf("game TensorBoard tag %q at step %d has %d records, want exactly one", tag, step, len(values))
-		}
-		if math.Float32bits(values[0]) != math.Float32bits(expectedValue) {
-			return false, fmt.Errorf("game TensorBoard tag %q at step %d has value %g, want %g", tag, step, values[0], expectedValue)
-		}
-	}
-	return true, nil
+	return missing, nil
 }

@@ -1,6 +1,7 @@
 package runstate
 
 import (
+	"encoding/json"
 	"errors"
 	"math"
 	"os"
@@ -32,7 +33,7 @@ func TestCreateMakesCompleteSelfContainedLayout(t *testing.T) {
 			t.Errorf("required directory %q is not a directory", path)
 		}
 	}
-	for _, path := range []string{layout.ConfigPath, layout.MetadataPath, layout.StatePath, layout.FinalMetricsPath, layout.ValidationGamesPath, layout.TrainingLogPath} {
+	for _, path := range []string{layout.ConfigPath, layout.MetadataPath, layout.StatePath, layout.CheckpointProgressPath, layout.FinalMetricsPath, layout.ValidationGamesPath, layout.TrainingLogPath} {
 		if filepath.Dir(path) != layout.Dir {
 			t.Errorf("artifact %q is not directly inside run directory %q", path, layout.Dir)
 		}
@@ -182,6 +183,40 @@ func TestStateRoundTripIsValidatedAndReplaced(t *testing.T) {
 	}
 	if len(leftovers) != 0 {
 		t.Fatalf("temporary state files left behind: %v", leftovers)
+	}
+}
+
+func TestCheckpointProgressIsAtomicAndReplaced(t *testing.T) {
+	layout, err := Create(t.TempDir(), "production-resume")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := layout.LoadCheckpointProgress(); !errors.Is(err, ErrCheckpointProgressNotFound) {
+		t.Fatalf("LoadCheckpointProgress before first save = %v, want ErrCheckpointProgressNotFound", err)
+	}
+	if err := layout.WriteCheckpointProgress(map[string]any{"global_update": 100, "loss": 1.25}); err != nil {
+		t.Fatalf("WriteCheckpointProgress first: %v", err)
+	}
+	if err := layout.WriteCheckpointProgress(map[string]any{"global_update": 200, "loss": 1.0}); err != nil {
+		t.Fatalf("WriteCheckpointProgress replacement: %v", err)
+	}
+	contents, err := layout.LoadCheckpointProgress()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]float64
+	if err := json.Unmarshal(contents, &got); err != nil {
+		t.Fatalf("decode progress: %v", err)
+	}
+	if got["global_update"] != 200 || got["loss"] != 1 {
+		t.Fatalf("checkpoint progress = %v", got)
+	}
+	leftovers, err := filepath.Glob(filepath.Join(layout.Dir, "."+checkpointProgressFilename+".tmp-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(leftovers) != 0 {
+		t.Fatalf("temporary checkpoint progress files left behind: %v", leftovers)
 	}
 }
 

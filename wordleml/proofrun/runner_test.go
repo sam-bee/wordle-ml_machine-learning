@@ -2,17 +2,193 @@ package proofrun
 
 import (
 	"encoding/json"
+	"errors"
+	"math"
 	"path/filepath"
 	"slices"
 	"testing"
 	"time"
 
 	"github.com/gomlx/gomlx/core/tensors"
+	"github.com/gomlx/gomlx/ml/model"
 	"github.com/sam-bee/wordle-ml_machine-learning/imitationdata"
 	"github.com/sam-bee/wordle-ml_machine-learning/runmetadata"
 	"github.com/sam-bee/wordle-ml_machine-learning/runstate"
 	"github.com/sam-bee/wordle-ml_machine-learning/vocabulary"
 )
+
+func TestValidateFiniteTrainableParameters(t *testing.T) {
+	finiteStore := model.NewStore()
+	finiteStore.VariableWithValue("/weights", []float32{1, -2}).SetTrainable(true)
+	if err := validateFiniteTrainableParameters(finiteStore); err != nil {
+		t.Fatalf("finite trainable parameters: %v", err)
+	}
+
+	for name, value := range map[string]float32{"nan": float32(math.NaN()), "infinity": float32(math.Inf(1))} {
+		t.Run(name, func(t *testing.T) {
+			store := model.NewStore()
+			store.VariableWithValue("/weights", []float32{1, value}).SetTrainable(true)
+			if err := validateFiniteTrainableParameters(store); err == nil {
+				t.Fatal("non-finite trainable parameter was accepted")
+			}
+		})
+	}
+}
+
+func TestProductionCompletionIsTenThousandUpdatesWithoutFullProofGate(t *testing.T) {
+	config, err := ConfigFor(Production)
+	if err != nil {
+		t.Fatal(err)
+	}
+	passing := productionResultForTest(config)
+	if !productionRunPassed(config, passing) {
+		t.Fatal("complete finite production result did not pass")
+	}
+	for name, mutate := range map[string]func(*Result){
+		"old full target": func(result *Result) { result.GlobalUpdate = 2000 },
+		"missing snapshot": func(result *Result) {
+			result.ValidationSnapshots = result.ValidationSnapshots[:len(result.ValidationSnapshots)-1]
+		},
+		"off cadence snapshot": func(result *Result) { result.ValidationSnapshots[1].Update++ },
+		"non-finite train":     func(result *Result) { result.FinalTraining.Loss = math.Inf(1) },
+		"best after target":    func(result *Result) { result.BestValidationStep = config.TargetUpdates + 1 },
+		"missing safety":       func(result *Result) { result.ProductionSafety = nil },
+		"partial safety":       func(result *Result) { result.ProductionSafety.UpdatesChecked-- },
+	} {
+		t.Run(name, func(t *testing.T) {
+			candidate := passing
+			candidate.ValidationSnapshots = append([]ValidationSnapshot(nil), passing.ValidationSnapshots...)
+			candidate.ProductionSafety = cloneProductionSafety(passing.ProductionSafety)
+			mutate(&candidate)
+			if productionRunPassed(config, candidate) {
+				t.Fatal("incomplete production result passed")
+			}
+		})
+	}
+}
+
+func productionResultForTest(config Config) Result {
+	snapshots := make([]ValidationSnapshot, 0, config.TargetUpdates/config.ValidationEvery+1)
+	for update := int64(0); update <= config.TargetUpdates; update += config.ValidationEvery {
+		snapshots = append(snapshots, ValidationSnapshot{Update: update, Metrics: Metrics{Loss: 1, Top1: .1, Top5: .2, Top16: .3}})
+	}
+	metrics := Metrics{Loss: 1, Top1: .1, Top5: .2, Top16: .3}
+	return Result{
+		Stage:                    Production,
+		GlobalUpdate:             config.TargetUpdates,
+		InitialTraining:          metrics,
+		FinalTraining:            metrics,
+		InitialValidation:        metrics,
+		FinalValidation:          metrics,
+		BestValidation:           metrics,
+		BestValidationStep:       0,
+		ProductionSafety:         &ProductionSafety{LossFinite: true, GradientsFinite: true, ParametersFinite: true, UpdatesChecked: config.TargetUpdates},
+		ValidationSnapshots:      snapshots,
+		InitialValidationDetails: ValidationSnapshot{Update: 0, Metrics: metrics},
+		FinalValidationDetails:   ValidationSnapshot{Update: config.TargetUpdates, Metrics: metrics},
+		BestValidationDetails:    ValidationSnapshot{Update: 0, Metrics: metrics},
+	}
+}
+
+func TestProductionPriorResultRecoversOnlyMatchingCheckpointProgress(t *testing.T) {
+	layout, err := runstate.Create(t.TempDir(), "production-resume")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := productionProgressForTest(100, 100)
+	matching := productionProgressForTest(200, 100)
+	if err := layout.WriteFinalMetricsJSON(stale); err != nil {
+		t.Fatal(err)
+	}
+	if err := layout.WriteCheckpointProgress(matching); err != nil {
+		t.Fatal(err)
+	}
+	state := runstate.State{GlobalUpdate: 200, ShuffleSeed: Seed, BestValidation: &runstate.BestValidation{Update: 100, Value: 1}}
+	got, recovered, err := loadPriorResult(layout, state, true)
+	if err != nil {
+		t.Fatalf("loadPriorResult: %v", err)
+	}
+	if !recovered || got.GlobalUpdate != state.GlobalUpdate {
+		t.Fatalf("result=%+v recovered=%t", got, recovered)
+	}
+
+	if err := layout.WriteCheckpointProgress(productionProgressForTest(300, 100)); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := loadPriorResult(layout, state, true); err == nil {
+		t.Fatal("ahead checkpoint progress was accepted")
+	}
+	wrongBest := productionProgressForTest(200, 100)
+	wrongBest.BestValidation.Loss = 2
+	if err := layout.WriteCheckpointProgress(wrongBest); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := loadPriorResult(layout, state, true); err == nil {
+		t.Fatal("checkpoint progress with a mismatched best state was accepted")
+	}
+}
+
+func TestProductionFinalMetricsMustMatchCheckpointBestAndSafety(t *testing.T) {
+	layout, err := runstate.Create(t.TempDir(), "production-final-identity")
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := runstate.State{GlobalUpdate: 200, ShuffleSeed: Seed, BestValidation: &runstate.BestValidation{Update: 100, Value: 1}}
+	wrongBest := productionProgressForTest(200, 100)
+	wrongBest.BestValidation.Loss = 2
+	if err := layout.WriteFinalMetricsJSON(wrongBest); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := loadPriorResult(layout, state, true); err == nil {
+		t.Fatal("matching-update final metrics with a mismatched best state were accepted")
+	}
+
+	wrongSafety := productionProgressForTest(200, 100)
+	wrongSafety.ProductionSafety.UpdatesChecked = 199
+	if err := layout.WriteFinalMetricsJSON(wrongSafety); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := loadPriorResult(layout, state, true); err == nil {
+		t.Fatal("matching-update final metrics with incomplete safety evidence were accepted")
+	}
+}
+
+func productionProgressForTest(update, bestUpdate int64) Result {
+	return Result{
+		Stage:              Production,
+		GlobalUpdate:       update,
+		InitialValidation:  Metrics{Loss: 1},
+		BestValidation:     Metrics{Loss: 1},
+		BestValidationStep: bestUpdate,
+		ProductionSafety:   &ProductionSafety{LossFinite: true, GradientsFinite: true, ParametersFinite: true, UpdatesChecked: update},
+	}
+}
+
+func TestProductionBootstrapAndCheckpointStateMatchers(t *testing.T) {
+	production, err := ConfigFor(Production)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !isProductionBootstrap(production, runstate.ErrStateNotFound) {
+		t.Fatal("production bootstrap was not accepted without initial state")
+	}
+	full, err := ConfigFor(Full)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if isProductionBootstrap(full, runstate.ErrStateNotFound) || isProductionBootstrap(production, errors.New("other")) {
+		t.Fatal("non-production or unrelated state error was accepted as bootstrap")
+	}
+	latest := runstate.State{GlobalUpdate: 200, ShuffleSeed: Seed, BestValidation: &runstate.BestValidation{Update: 100, Value: 1.25}}
+	best := runstate.State{GlobalUpdate: 100, ShuffleSeed: Seed, BestValidation: &runstate.BestValidation{Update: 100, Value: 1.25}}
+	if !bestCheckpointMatchesLatestState(best, latest) {
+		t.Fatal("matching best checkpoint was rejected")
+	}
+	best.BestValidation.Value++
+	if bestCheckpointMatchesLatestState(best, latest) {
+		t.Fatal("mismatched best checkpoint was accepted")
+	}
+}
 
 func TestManifestIdentityComparesEffectiveConfigSemantically(t *testing.T) {
 	collected := time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC)
@@ -89,6 +265,58 @@ func TestResumedSamplerMustMatchCheckpointPeek(t *testing.T) {
 	state.NextRecordIDs[0]++
 	if err := validateSamplerPeek(state, sampler); err == nil {
 		t.Fatal("mismatched sampler peek was accepted")
+	}
+}
+
+func TestProductionResumedSamplerMustMatchGlobalUpdate(t *testing.T) {
+	dataDir := filepath.Join("..", "..", "data")
+	vocabulary, err := vocabulary.Load(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	trainData, err := imitationdata.Load(vocabulary, filepath.Join(dataDir, "imitation"), imitationdata.Train)
+	if err != nil {
+		t.Fatal(err)
+	}
+	opening, found, err := trainData.FindOpening()
+	if err != nil || !found {
+		t.Fatalf("FindOpening = found %t, err %v", found, err)
+	}
+	config, err := ConfigFor(Production)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reference, err := imitationdata.NewTrainingSampler(trainData, opening, config.BatchSize, config.Seed, imitationdata.Cursor{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const update = int64(100)
+	if err := reference.AdvanceBatches(int(update)); err != nil {
+		t.Fatal(err)
+	}
+	cursor := reference.Cursor()
+	restored, err := imitationdata.NewTrainingSampler(trainData, opening, config.BatchSize, config.Seed, cursor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := runstate.State{GlobalUpdate: update, ShuffleSeed: Seed, DatasetEpoch: cursor.Epoch, ShuffledCursor: cursor.Offset, NextRecordIDs: restored.Peek()}
+	if err := validateProductionSamplerResumeState(state, restored, trainData, opening, config); err != nil {
+		t.Fatalf("matching production sampler: %v", err)
+	}
+
+	// This cursor and its peek agree with each other, but they describe update
+	// zero rather than the global update claimed by the checkpoint.
+	corrupt, err := imitationdata.NewTrainingSampler(trainData, opening, config.BatchSize, config.Seed, imitationdata.Cursor{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	badCursor := corrupt.Cursor()
+	state.DatasetEpoch, state.ShuffledCursor, state.NextRecordIDs = badCursor.Epoch, badCursor.Offset, corrupt.Peek()
+	if err := validateSamplerPeek(state, corrupt); err != nil {
+		t.Fatalf("corrupt sampler was not self-consistent: %v", err)
+	}
+	if err := validateProductionSamplerResumeState(state, corrupt, trainData, opening, config); err == nil {
+		t.Fatal("self-consistent cursor unrelated to GlobalUpdate was accepted")
 	}
 }
 
