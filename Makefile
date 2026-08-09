@@ -201,8 +201,8 @@ cuda-cgo-final-test-preflight:
 cuda-cgo-final-test: cuda-cgo-final-test-preflight
 	$(MAKE) cuda-cgo-dependency-audit
 	$(CUDA_RUN) bash -lc \
-		'git diff --quiet HEAD -- . ":(exclude)AGENTS.md" && \
-		test -z "$$(git ls-files --others --exclude-standard)" || \
+		'git -C /workspace diff --quiet HEAD -- . ":(exclude)AGENTS.md" && \
+		test -z "$$(git -C /workspace ls-files --others --exclude-standard)" || \
 			{ echo "runtime sources changed after final-test preflight" >&2; exit 1; }; \
 		CGO_ENABLED=1 go build -tags $(CUDA_CGO_TAG) \
 			-ldflags "-X main.evaluatorCommit=$$(git -C /workspace rev-parse HEAD)" \
