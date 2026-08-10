@@ -49,4 +49,9 @@ ENV GOMLX_BACKEND=xla:cuda
 ENV GOMLX_NO_AUTO_INSTALL=1
 ENV PJRT_PLUGIN_LIBRARY_PATH=/home/wordleml/.local/lib/go-xla/nvidia
 
+# NVIDIA Container Toolkit mounts the selected host GPU's driver library here.
+# Prefer it to the CUDA image's forward-compatibility libcuda: the latter is
+# not usable with the GeForce GPUs on the development machines.
+ENV LD_LIBRARY_PATH=/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH}
+
 CMD ["go", "run", "./cmd/smoke"]

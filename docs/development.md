@@ -28,6 +28,14 @@ Compose reserves exactly one device by the UUID in `.env`; it does not use `gpus
 `CUDA_VISIBLE_DEVICES`. The selected device must be an RTX 5070 Ti or RTX 5050; `NVIDIA GeForce RTX 5050 Laptop GPU`
 is an approved laptop name. This excludes all other devices, including the desktop's RTX 3060.
 
+The CUDA image prepends `/lib/x86_64-linux-gnu` to its library search path so
+CUDA resolves `libcuda` from the driver mounted by NVIDIA Container Toolkit.
+This keeps the CUDA 13.1 user-space stack fixed while using the actual driver
+from either development machine. Without that ordering, the image's bundled
+forward-compatibility library can be selected on the laptop and fail with
+`forward compatibility was attempted on non supported HW`. No host driver
+installation or configuration change is required.
+
 The UUID is stable for the physical card, but `.env` must name this machine's approved card. Resolve UUIDs without
 changing the host system:
 

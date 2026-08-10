@@ -20,6 +20,10 @@ gradually and keep the Wordle problem visible throughout, rather than turning in
 - Show that GPU selection is a real engineering concern: Compose passes exactly
   one UUID-selected, approved RTX 5070 Ti or RTX 5050 (including the 5050
   Laptop GPU name) and rejects every other visible card, including an RTX 3060.
+- Briefly distinguish the pinned CUDA user-space stack from the host driver:
+  the container deliberately resolves `libcuda` from NVIDIA Container
+  Toolkit's host-driver mount, which lets the same image use the 5070 Ti
+  desktop and 5050 laptop without changing either machine's driver.
 - Use the small CUDA smoke kernel to make `sm_120`, compute capability 12.0, host/device memory, and kernel launch syntax
   concrete before introducing model code.
 - Follow it with the GoMLX Euclidean-distance graph to introduce symbolic graphs, XLA compilation, and the reference
