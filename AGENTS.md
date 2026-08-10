@@ -25,6 +25,8 @@ If you are told to use pull requests, you **must** go away and research the Gith
 very new - you won't have heard of it - but it is the correct way to manage several PRs which are to be merged in a
 specific order.
 
+If you can see a `gitlab` remote already configured, please keep it in sync with the Github one.
+
 ## Systems Administration
 
 In general, agents should not be doing systems administration on the laptop or desktop. Development should generally be
