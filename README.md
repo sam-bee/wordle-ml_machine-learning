@@ -11,9 +11,13 @@ The best full checkpoint reduced validation loss from 8.3005 to 3.1633 and
 raised top-1 agreement from 0.0056 to 0.5008. On the fixed 100-game validation
 population it solved 97/100 games versus 4/100 at initialization, reducing mean
 guesses from 5.86 to 3.65; the mini stop/resume proof also passed. These are
-proof-run results, not a claim of broader generalization: the final-test split
-remains sealed and the recorded state-distribution overlap is documented in the
-report.
+validation proof-run results, not a broader generalization claim. The 100
+final-test solutions were not scored or used for model decisions during that
+work. After selection, one intentional CUDA/cgo gameplay evaluation scored that
+population once: it solved 97/100 games with 3.75 mean guesses. See the
+[final-test CUDA evaluation report](docs/ml/final-test-cuda-evaluation-report.md).
+No tuning followed; the recorded state-distribution overlap remains documented
+in the proof report.
 
 ## Quick start
 
@@ -80,7 +84,9 @@ residual architecture and exact parameter accounting are documented in
 
 The offline WDIT v3 corpus comes from synthetic-data generator release `v0.1.0`: 52,726 training records (including
 one opening record), 1,600 mini records, and 2,500 records in each validation and final-test split. The final test is
-held back and untouched. The data contract and first supervised-run plumbing are described in
+held back from model decisions. Its 2,500 final WDIT records remain unopened;
+the later one-time CUDA gameplay evaluation read only the 100-solution list.
+The data contract and first supervised-run plumbing are described in
 [`docs/ml/supervised-training.md`](docs/ml/supervised-training.md).
 
 Run one fixed proof stage with a stable, unused run ID. The run records its
@@ -120,8 +126,10 @@ files for every proof stage and their game-summary tags, and atomically writes
 the report. A failed gate returns non-zero and writes a visibly incomplete
 report with the stopping reason, without replacing an existing successful
 report.
-The final-test split remains sealed: neither training nor evaluation offers a
-test-split mode.
+These original proof commands remain validation-only: they never score the
+final 100 solutions. The separately authorized CUDA/cgo aggregate is a
+completed, non-repeatable post-selection evaluation, documented in the
+[final-test CUDA evaluation report](docs/ml/final-test-cuda-evaluation-report.md).
 
 ## Fixed production run
 
@@ -144,6 +152,7 @@ The completed first run, `production-20260809-005026Z`, selected update 2,200:
 validation loss improved from the retained proof's 3.1633 to 3.1341, while
 both checkpoints solved 97/100 validation games and mean guesses changed from
 3.65 to 3.68. This is a validation-only result, not a generalization claim;
-the final-test split remains sealed. See
+the later final-test CUDA evaluation is separate and did not change this
+historical production result. See
 [`docs/ml/supervised-training.md`](docs/ml/supervised-training.md) for fixed
 configuration, resume, and handoff details.

@@ -27,10 +27,13 @@ that checkpoint with `proof-full-20260808`. Production validation loss was
 3.1341 versus 3.1633 for the proof best; both solved 97/100 validation games,
 with mean guesses 3.68 versus 3.65.
 
-Following this production report, keep any further experiment bounded and
-validation-only until a new plan is approved.
+Model and training decisions then closed. The selected CUDA/cgo model performed
+one authorized, post-selection aggregate gameplay evaluation of the 100 final
+solutions: 97/100 solved, with 3.75 mean guesses. The result is in the
+[final-test CUDA evaluation report](../ml/final-test-cuda-evaluation-report.md).
+No tuning followed, and the final 2,500-record WDIT corpus remains unopened.
 
-The 100-solution final-test split remains sealed until model and training
-decisions are finished. Neither the completed proof nor the production run
-establishes broader generalization. Gameplay, reinforcement learning, and a
-custom CUDA model are not part of the next decision.
+The completed proof and production run remain their historical validation-only
+evidence; the final aggregate is one bounded held-out outcome, not a reason to
+resume model selection. Gameplay, reinforcement learning, and further model
+changes remain outside this completed workflow.

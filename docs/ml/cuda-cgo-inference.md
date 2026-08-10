@@ -78,6 +78,34 @@ and guess count. The matching summary is **98/100 solved** with **3.66 mean
 guesses**. This is parity evidence for this fixed validation population and
 checkpoint, not a broader generalization claim.
 
+## One-time final-test gameplay aggregate
+
+After checkpoint and implementation selection, the CUDA/cgo backend performed
+one intentional gameplay evaluation of the 100 final solutions. The sanitized
+[`final-test-evaluation.json`](../../artifacts/cuda-cgo/final-test-evaluation.json)
+is the durable, non-repeatable record: it was completed at
+`2026-08-09T23:54:12.480769529Z` by evaluator commit `b5703a7`, using
+`seed-replication-20260809-132505Z` `best` update 2,600 and weight SHA-256
+`b78dc980505998d9dd40551ef4d24788b8378be63e4d09fb90aa0a8be83c870d` on an
+RTX 5070 Ti (compute capability 12.0, CUDA runtime 13.1, driver 13.2).
+
+| Aggregate gameplay result | Value |
+| --- | ---: |
+| Games / solved / failures | 100 / 97 / 3 |
+| Solved fraction | 0.970 |
+| Mean guesses | 3.75 |
+| Guess-count distribution (1..6; failures count as six) | [0, 0, 45, 41, 8, 6] |
+| Invalid selections | 0 |
+| Suppressed raw-top selections / repeated selections | 6 / 6 |
+
+This is the first intentional post-selection gameplay scoring of that
+population, not the first historical vocabulary-list read: earlier proof and
+production paths could load the fixed list for vocabulary/hash context, but did
+not score it or use it for model decisions. No tuning followed this result.
+The final WDIT v3 test corpus of 2,500 records was not opened. The dedicated
+[final-test CUDA evaluation report](final-test-cuda-evaluation-report.md)
+explains that scope without publishing words or trajectories.
+
 ## Ownership boundary
 
 ```text
@@ -177,10 +205,11 @@ make cuda-cgo-demo MODEL_DIR=runs/seed-replication-20260809-132505Z/exports/cuda
 
 `cuda-cgo-build` first compiles the `.cu` file with `nvcc` into a PIC object,
 archives `build/cuda/libwordle_cuda.a`, then builds the tagged `cudaverify`,
-`cudabench`, and `cudaweb` commands with `CGO_ENABLED=1 -tags cuda_cgo`.
-cgo does not compile CUDA source directly. Generated native objects, binaries,
-model payloads, and binary profiler reports are not committed; the compact
-text/CSV interpretations and browser PNG below are tracked talk evidence.
+`cudabench`, `cudafinal`, and `cudaweb` commands with
+`CGO_ENABLED=1 -tags cuda_cgo`. cgo does not compile CUDA source directly.
+Generated native objects, binaries, model payloads, and binary profiler reports
+are not committed; the compact text/CSV interpretations and browser PNG below
+are tracked talk evidence.
 
 The standalone verifier loads the artifact and its golden sidecars without
 GoMLX. It compares the stored GoMLX reference logits with the portable Go
@@ -198,6 +227,11 @@ max**. The JSON report records the model and device identity alongside those
 numbers. They describe this batch-one workload only; they are not a comparison
 with GoMLX or evidence of a general speedup. Launch overhead and transfers can
 matter materially at this size.
+
+The one-shot `make cuda-cgo-final-test` target is not a benchmark or routine
+verification target. Its completed aggregate record above is claim-guarded and
+must not be rerun; it does not replace the validation-only golden-vector and
+trajectory verifier.
 
 The direct demo listens on <http://127.0.0.1:8083>. It warms one opening
 position, exposes `GET /healthz`, `GET`/`PUT /api/models`, `GET /api/solutions`,
@@ -226,8 +260,9 @@ go version -m bin/cudaweb
 ldd bin/cudaweb
 ```
 
-The dependency audit must show no GoMLX, PJRT, or XLA package in `cudaweb` or
-`cudaverify`; the offline exporter is intentionally exempt.
+The dependency audit must show no GoMLX, PJRT, or XLA package in `cudaweb`,
+`cudaverify`, `cudabench`, or `cudafinal`; the offline exporter is
+intentionally exempt.
 
 ## Profiling and screenshot assets
 

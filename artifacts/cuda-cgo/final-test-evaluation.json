@@ -1,0 +1,41 @@
+{
+  "format": "wordle-cuda-final-test",
+  "version": 1,
+  "status": "complete",
+  "timestamp_utc": "2026-08-09T23:54:12.480769529Z",
+  "evaluator_commit": "b5703a74e63e37ac0cbf54aae4ca79baa9799152",
+  "model": {
+    "format": "wordle-cuda-f32-v1",
+    "run_id": "seed-replication-20260809-132505Z",
+    "checkpoint": "best",
+    "checkpoint_update": 2600,
+    "training_commit": "2718164bb80460757592b90aa86b96eb6d596018",
+    "weights_sha256": "b78dc980505998d9dd40551ef4d24788b8378be63e4d09fb90aa0a8be83c870d",
+    "parameter_count": 1046596
+  },
+  "device": {
+    "device_name": "NVIDIA GeForce RTX 5070 Ti",
+    "compute_capability": "12.0",
+    "cuda_runtime_version": "13.1",
+    "cuda_driver_version": "13.2"
+  },
+  "final_test_sha256": "978a25608a96370b3e26cc8621e9f2cc83ad2d581d07b4b23546b0b4ccdec130",
+  "aggregate": {
+    "games": 100,
+    "solved": 97,
+    "solved_fraction": 0.97,
+    "mean_guesses": 3.75,
+    "guess_count_distribution": [
+      0,
+      0,
+      45,
+      41,
+      8,
+      6
+    ],
+    "failures": 3,
+    "invalid_selections": 0,
+    "suppressed_raw_top_selections": 6,
+    "repeated_selections": 6
+  }
+}

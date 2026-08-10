@@ -8,6 +8,11 @@ The project keeps its model-facing Wordle vocabularies in [`data/`](../../data/)
 - [`wordlist-valid-solutions-validation-100.csv`](../../data/wordlist-valid-solutions-validation-100.csv) contains 100 solutions used for evaluation during model and hyperparameter development.
 - [`wordlist-valid-solutions-test-100.csv`](../../data/wordlist-valid-solutions-test-100.csv) contains the final 100-solution holdout. Do not use it to make modelling decisions.
 
+The fixed vocabulary loader can read this list to validate split identity; that
+is not final-test scoring. The one intentional post-selection gameplay
+evaluation of all 100 solutions is recorded only as a sanitized aggregate in
+the [final-test CUDA evaluation report](../ml/final-test-cuda-evaluation-report.md).
+
 Each filename records its word count immediately before the `.csv` extension. The files contain one uppercase,
 five-letter word per line, in alphabetical order, with no header. Despite the `.csv` extension, each row has only one
 field.
@@ -40,4 +45,5 @@ use mini; they deliberately do not open final-test records.
 These are the frozen `wordle-ml_synthetic-data-creation` release `v0.1.0`
 artifacts. Train contains 52,726 records, including one opening record; mini
 contains 1,600; validation and final test contain 2,500 each. The final-test
-files remain sealed while training and model decisions are made.
+**WDIT** files remain unopened. The separately evaluated 100-solution word
+list is not a read of these `.bin` or `.json` records.

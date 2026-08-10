@@ -8,6 +8,26 @@ Both profiling targets send the instrumented benchmark's JSON report to
 `/tmp` inside their short-lived container. They therefore do not overwrite the
 canonical 20-warm-up/200-measurement `benchmark-report.json` beside the model.
 
+## One-time final-test gameplay aggregate
+
+[`final-test-evaluation.json`](final-test-evaluation.json) is the completed,
+sanitized record of the one intentional post-selection CUDA/cgo gameplay
+evaluation. It records aggregate facts only: the selected model and device,
+timestamp, final-list SHA-256, and 100-game outcome. It deliberately contains
+no solution words, guesses, trajectories, or failed-solution list.
+
+The completed RTX 5070 Ti run solved 97/100 games with 3.75 mean guesses,
+three failures, zero invalid selections, and a `[0, 0, 45, 41, 8, 6]`
+one-through-six guess distribution (failed games count as six). The durable
+claim makes the evaluation non-repeatable. It was the first intentional
+post-selection gameplay scoring, not the first historical vocabulary-list
+read: earlier proof and production paths could load the list for fixed
+vocabulary/hash context but did not score it. The 2,500-record final WDIT
+corpus was not opened, and no tuning followed.
+
+See [the final-test CUDA evaluation report](../../docs/ml/final-test-cuda-evaluation-report.md)
+for the scope and complete aggregate table.
+
 Run all commands from the repository root. `MODEL_DIR` may be either an
 absolute in-container path or a path relative to the repository root:
 

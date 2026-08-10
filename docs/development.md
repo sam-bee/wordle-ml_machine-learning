@@ -90,6 +90,13 @@ make cuda-cgo-bench MODEL_DIR=runs/seed-replication-20260809-132505Z/exports/cud
 make cuda-cgo-demo MODEL_DIR=runs/seed-replication-20260809-132505Z/exports/cuda-f32-v1/best
 ```
 
+`make cuda-cgo-final-test` is deliberately outside that ordinary sequence. It
+has completed its one post-selection gameplay evaluation and its durable claim
+refuses a second read; see the
+[final-test CUDA evaluation report](ml/final-test-cuda-evaluation-report.md).
+It scores the 100 final solutions only and does not open the 2,500-record final
+WDIT corpus.
+
 `cuda-cgo-export` is the only step permitted to use GoMLX: it restores and
 exports the checkpoint. `cuda-cgo-build`, verifier, benchmark, and `cudaweb`
 use `CGO_ENABLED=1` and the `cuda_cgo` build tag; their runtime dependency
@@ -206,8 +213,10 @@ and use the same command to resume it. Check the outer chain status at
 TensorBoard service) for live status. After successful training, the command
 independently verifies its best checkpoint and runs all 100 validation games,
 then atomically creates the validation-only comparison at
-`docs/ml/production-training-report.md`. The final-test split is never opened;
-any failure stops the post-training chain with retained status and logs.
+`docs/ml/production-training-report.md`. The production command never scores
+the final 100 solutions or opens final WDIT records; its vocabulary validation
+may read split identity. Any failure stops the post-training chain with
+retained status and logs.
 
 The recorded train/validation state-overlap audit is not solution-split
 leakage: solution IDs remain disjoint, while 190 of 2,445 unique validation

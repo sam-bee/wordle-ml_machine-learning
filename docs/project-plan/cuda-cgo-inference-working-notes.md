@@ -10,8 +10,10 @@ an implementation map, not the final operator documentation.
   `wordleml/runmetadata` provide the supported run validation and checkpoint
   restoration path used by the offline exporter.
 - `wordleml/vocabulary` and `wordleml/modelstate` remain the canonical word-ID,
-  hash, and four-input encoding boundary. CUDA-specific commands use the sealed
-  loader which never opens the final-test split.
+  hash, and four-input encoding boundary. Ordinary CUDA runtime, verifier,
+  benchmark, and browser commands use the loader without final-test membership.
+  The distinct, completed `cudafinal` command was the one authorized exception
+  for aggregate gameplay scoring of the 100 final solutions.
 - `wordleml/gameeval` remains authoritative for gameplay, availability masking,
   repeat suppression, and deterministic lower-action-ID tie breaking.
 - `wordleml/serving` and `wordleml/cmd/serve` remain the GoMLX fallback. The new
@@ -27,4 +29,6 @@ The selected source is run `seed-replication-20260809-132505Z`, selector
 `best`, update 2,600, trained at commit
 `2718164bb80460757592b90aa86b96eb6d596018`. Its requested checkpoint is the
 latest complete pair in `checkpoints/best` and records 1,046,596 trainable FP32
-parameters. The run deliberately records no final-test artifact.
+parameters. At export time the run deliberately recorded no final-test artifact;
+the later one-time aggregate is instead kept separately under
+`artifacts/cuda-cgo/`.

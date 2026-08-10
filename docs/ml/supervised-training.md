@@ -4,7 +4,9 @@ The first run uses a frozen, offline WDIT v3 corpus produced by
 `wordle-ml_synthetic-data-creation` release `v0.1.0`. The checked-in artifacts
 contain 52,726 train records, including one opening record; 1,600 mini
 records; and 2,500 records each for validation and final test. The final-test
-files are deliberately not opened by default inspection or training work.
+**WDIT** files are deliberately not opened by default inspection or training
+work. This is distinct from loading the 100-solution word list for fixed
+vocabulary/hash context.
 
 `imitationdata` validates each binary file and its JSON sidecar against the
 checked-in vocabulary and solution-split hashes before expanding a record.
@@ -140,9 +142,13 @@ training, safety checks, checkpoint reload, validation, or gameplay stops this
 chain and leaves a clear failure status and logs; it does not silently retry
 with changed settings.
 
-The final-test split remains sealed throughout. `cmd/production` neither loads
-final-test examples nor evaluates them, and the production report is a
-validation-only comparison.
+The original production workflow never scores the final 100 solutions or opens
+the final WDIT records; its fixed-vocabulary validation can read solution-list
+membership and hashes. Its report is therefore a validation-only comparison.
+After model selection, the separate CUDA/cgo evaluator performed one aggregate
+gameplay scoring of the 100 final solutions. It did not open the 2,500-record
+final WDIT corpus; see the
+[final-test CUDA evaluation report](final-test-cuda-evaluation-report.md).
 
 ## Completed first production run
 
@@ -154,8 +160,9 @@ declared tolerance. Compared with the retained proof best, validation loss
 improved from 3.1633 to 3.1341 and top-1 rose from 0.5008 to 0.5100. Both
 checkpoints solved 97/100 validation games, while mean guesses changed from
 3.65 to 3.68. This small validation-metric improvement did not improve the
-game solved fraction and is not a generalization claim. No final-test examples
-were loaded or evaluated.
+game solved fraction and is not a generalization claim. This production run did
+not score final-test games or open final WDIT records, even though vocabulary
+validation can load final-solution membership.
 
 ## Completed initial proof
 
@@ -165,10 +172,13 @@ checkpoint reduced validation loss from 8.3005 to 3.1633 and raised validation
 top-1 from 0.0056 to 0.5008. On the same fixed 100-game validation population,
 it solved 97/100 games versus 4/100 for initialization, with mean guesses 3.65
 versus 5.86. This is evidence for the bounded proof workflow only, not a claim
-of generalization; the final-test split remains sealed.
+of generalization; the final 100 solutions were held out from proof scoring and
+model decisions.
 
 The exact train/validation state-overlap audit is retained in every run: 190
 of 2,445 unique validation encoded states also occur in training, and their
 teacher top-1 labels agree. This is state-distribution overlap, not
-solution-split leakage—the frozen solution IDs remain disjoint. No command
-exposes the final-test split.
+solution-split leakage—the frozen solution IDs remain disjoint. The completed
+one-shot CUDA evaluator is the sole post-selection command that scores the
+final 100 solutions, while the 2,500-record final WDIT corpus remains
+unopened.

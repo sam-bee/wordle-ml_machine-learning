@@ -37,14 +37,18 @@ gradually and keep the Wordle problem visible throughout, rather than turning in
   at each output index.
 - Keep the larger set of all game-legal guesses outside the initial model. This simplifies the demo while retaining
   every possible solution as an action.
-- Split by solution, not by generated game state: 2,109 answers for training, 100 for validation while tuning, and 100
-  held back for one final test. This prevents states for the same answer leaking across datasets.
+- Split by solution, not by generated game state: 2,109 answers for training,
+  100 for validation while tuning, and 100 held out from model selection for
+  one final gameplay evaluation. This prevents states for the same answer
+  leaking across datasets.
 - Be precise about a known caveat: the solution IDs remain disjoint, but 190
   of 2,445 unique validation encoded states also occur in training with
   agreeing teacher labels. Record that as state-distribution overlap, not as
   solution-split leakage.
-- Keep the full 2,309-word backup alongside the fixed split. Repeatedly consulting the final test set turns human
-  judgement into another way of overfitting.
+- Keep the full 2,309-word backup alongside the fixed split. Repeatedly
+  consulting final-test outcomes turns human judgement into another way of
+  overfitting; show the single post-selection aggregate only after the selection
+  story is complete.
 - Freeze the generated examples as a versioned offline corpus: WDIT v3 release `v0.1.0` contains 52,726 training
   records, 1,600 mini records, and 2,500 records in each validation and final-test split. Teacher ranking is not part of
   the training hot path.
@@ -81,8 +85,10 @@ gradually and keep the Wordle problem visible throughout, rather than turning in
 
 ## Fixed supervised proof workflow
 
-- Freeze the teacher corpus before showing optimisation: WDIT v3 generator `v0.1.0` supplies 52,726 training records
-  (one is the opening state), 1,600 mini records, and 2,500 each for validation and untouched final test.
+- Freeze the teacher corpus before showing optimisation: WDIT v3 generator
+  `v0.1.0` supplies 52,726 training records (one is the opening state), 1,600
+  mini records, and 2,500 each for validation and untouched final **WDIT**
+  records.
 - Show the reader expanding a compact record through the same encoder used for future play. Its extra availability mask
   is separate from the candidate-bonus input and clears only guesses already made.
 - The fixed `overfit`, `mini`, and `full` stages make the demonstration
@@ -104,7 +110,8 @@ gradually and keep the Wordle problem visible throughout, rather than turning in
   increased top-1 from 0.0056 to 0.5008. Its best checkpoint solved 97/100 of
   the fixed validation games versus 4/100 at initialization, reducing mean
   guesses from 5.86 to 3.65. Present this as a bounded proof result, not a
-  generalization claim: validation guides choices and final test stays sealed.
+  generalization claim: validation guided choices; final solutions were not
+  scored during the proof or used for selection.
 - The proof was followed by one fresh, fixed production continuation: the same
   full training split, encoder, policy, objective, opening-state sampling,
   seed, optimizer, batch size, learning rate, and clipping; the only
@@ -122,8 +129,15 @@ gradually and keep the Wordle problem visible throughout, rather than turning in
   from 0.5008/0.6052/0.6596 to 0.5100/0.6108/0.6640. Both solved 97/100
   validation games; mean guesses rose slightly from 3.65 to 3.68. That contrast
   is a useful lesson: a small validation metric improvement did not improve
-  this gameplay success rate. Keep the claim validation-only and the final
-  test sealed.
+  this gameplay success rate. Keep the claim validation-only; only after all
+  selection decisions did the separate CUDA aggregate score the final 100.
+- The one intentional post-selection CUDA/cgo gameplay evaluation of those 100
+  final solutions solved **97/100** with **3.75** mean guesses (failed games
+  count as six), distribution `[0, 0, 45, 41, 8, 6]`, three failures, and zero
+  invalid selections. It ran on the RTX 5070 Ti and produced aggregate-only
+  evidence: no final solution words or trajectories were published, and no
+  final WDIT records were read. No tuning followed. See the
+  [final-test CUDA evaluation report](../docs/ml/final-test-cuda-evaluation-report.md).
 - Keep the existing port-8082 GoMLX visualiser as a useful contrast: its run
   picker selects compatible checkpoints and the browser proxies to an internal
   GoMLX/XLA service. The direct port-8083 CUDA/cgo demo deliberately differs:
@@ -235,6 +249,10 @@ gradually and keep the Wordle problem visible throughout, rather than turning in
    trajectories match; the 200-call warm benchmark mean was 94,945 ns. Nsight
    GUI screenshots remain a manual capture step even though report artifacts
    exist.
+7. Only then show the one-time final aggregate: 97/100 solved, 3.75 mean
+   guesses, and no invalid selections. State that model selection was already
+   over, no tuning followed, the 2,500 final WDIT records remained unopened,
+   and the browser game is still not evaluation evidence.
 
 ## Later structure
 

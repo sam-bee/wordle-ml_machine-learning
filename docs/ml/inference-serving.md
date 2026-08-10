@@ -62,8 +62,9 @@ make monitoring
 
 Open <http://127.0.0.1:8082>. For an API-only process use `make inference`.
 The model picker re-scans `runs/`, so a newly completed compatible run appears
-without restarting the inference service. The final-test split remains sealed:
-only the fixed validation list is exposed or accepted.
+without restarting the inference service. This retained service is
+validation-only: only the fixed validation list is exposed or accepted. The
+separate one-time CUDA aggregate did not change this API.
 
 ## Separate CUDA/cgo demonstration
 

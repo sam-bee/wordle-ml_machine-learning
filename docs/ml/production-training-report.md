@@ -23,4 +23,7 @@ This report validates the completed production run and independently reloaded be
   - commits: machine-learning `5f48086e1e26ccd28fafa9a9f148f61fba1d52fb`; synthetic-data `456f60023fea5680a8f55db2c8e872cf802d6d20`; game-engine `57e6eaca35c7997364b1790c2a6cd33e0478ae0d`
   - validation split hash: `3cadd757ce9e6c57676358a8a13de4ef3d12fc2af7ba3033278c9926b867c019`; best-metric reproduction tolerance: `0.0002`
 
-The sealed final-test split is not opened, evaluated, or represented by this report.
+This historical production report is validation-only. Its run may load the
+final-solution list for fixed vocabulary/hash context, but it neither scores
+those 100 solutions nor opens the 2,500-record final WDIT corpus; neither is
+represented here.
